@@ -16,26 +16,7 @@ export default function RootLayout() {
     <Suspense fallback={<ActivityIndicator size="large"/>}>
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(tabs)" options={{ headerShown: false, animation: "default" }} />
-            <Stack.Screen 
-              name="(modals)/upcomingpayments" 
-              options={{ headerShown: true, title: "Upcoming Payments", animation: "default", headerBackTitle: "Back" }} 
-            />
-            <Stack.Screen 
-              name="(modals)/recentspendingspage" 
-              options={{ headerShown: true, title: "Recent Spendings", animation: "default", headerBackTitle: "Back" }} 
-            />
-            <Stack.Screen 
-              name="(modals)/notifications" 
-              options={{ headerShown: true, title: "Notifications", animation: "default", headerBackTitle: "Back" }} 
-            />
-            <Stack.Screen 
-              name="(modals)/(settings-modals)/profile" 
-              options={{ headerShown: true, title: "Profile", animation: "default", headerBackTitle: "Back" }} 
-            />
-            <Stack.Screen 
-            name="(modals)/(settings-modals)/language" 
-            options={{ headerShown: false, title: "Language", animation: "default", headerBackTitle: "Back" }} 
-          />
+            
           </Stack>
     </Suspense>
     </GestureHandlerRootView>
