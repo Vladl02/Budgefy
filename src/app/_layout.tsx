@@ -1,8 +1,7 @@
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import { Stack } from "expo-router";
 import { Suspense } from "react";
-import { ActivityIndicator } from "react-native";
-import { BackHandler } from "react-native";
+import { ActivityIndicator, BackHandler } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 const DATABASE_NAME = "users_13.db";

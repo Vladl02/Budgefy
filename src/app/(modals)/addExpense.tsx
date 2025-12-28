@@ -1,15 +1,25 @@
+import { useNavigation } from "@react-navigation/native";
 import { router, useLocalSearchParams } from "expo-router";
-import { ArrowLeft, Check } from "lucide-react-native";
+import { Check } from "lucide-react-native";
 import React, { useCallback, useEffect, useMemo } from "react";
 import { BackHandler, Dimensions, Pressable, StyleSheet, Text, View } from "react-native";
-import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, {
+  Easing,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { scheduleOnRN } from "react-native-worklets";
 
 type ProgressBarProps = {
   spent: number;
   total: number;
 };
+
+
 
 function ProgressBar({ spent, total }: ProgressBarProps) {
   const safeTotal = total > 0 ? total : 0;
@@ -41,25 +51,43 @@ export default function AddExpense() {
   const { category } = useLocalSearchParams<{ category?: string }>();
   const categoryName = Array.isArray(category) ? category[0] : category;
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation();
   const title = categoryName ?? "Shopping";
-  const sheetHeight = useMemo(() => Math.round(Dimensions.get("window").height * 0.90), []);
-  const progress = useSharedValue(0);
+  //const sheetHeight = useMemo(() => Math.round(Dimensions.get("window").height * 0.90), []);
+  const sheetHeight = Dimensions.get("screen").height * 0.9;
+  const translateY = useSharedValue(sheetHeight);
+
+  const finishClose = useCallback(() => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+    const parent = navigation.getParent();
+    if (parent?.canGoBack()) {
+      parent.goBack();
+      return;
+    }
+    router.replace("/");
+  }, [navigation]);
 
   const handleClose = useCallback(() => {
-    progress.value = withTiming(
-      0,
+    translateY.value = withTiming(
+      sheetHeight,
       { duration: 220, easing: Easing.in(Easing.cubic) },
       (finished) => {
-        scheduleOnRN(() => {
-          router.back();
-        });
+        if (finished) {
+          runOnJS(finishClose)();
+        }
       }
     );
-  }, [progress]);
+  }, [finishClose, sheetHeight, translateY]);
 
   useEffect(() => {
-    progress.value = withTiming(1, { duration: 260, easing: Easing.out(Easing.cubic) });
-  }, [progress]);
+    translateY.value = sheetHeight;
+    requestAnimationFrame(() => {
+      translateY.value = withTiming(0, { duration: 260, easing: Easing.out(Easing.cubic) });
+    });
+  }, [sheetHeight, translateY]);
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
@@ -70,12 +98,46 @@ export default function AddExpense() {
     return () => subscription.remove();
   }, [handleClose]);
 
+  const panGesture = useMemo(() => {
+    const closeThreshold = sheetHeight * 0.2;
+    return Gesture.Pan()
+      .onUpdate((event) => {
+        translateY.value = Math.min(sheetHeight, Math.max(0, event.translationY));
+      })
+      .onEnd((event) => {
+        const shouldClose = event.translationY > closeThreshold || event.velocityY > 1200;
+        if (shouldClose) {
+          translateY.value = withSpring(
+            sheetHeight,
+            {
+              damping: 24,
+              stiffness: 260,
+              velocity: event.velocityY,
+              overshootClamping: true,
+            },
+            (finished) => {
+              if (finished) {
+                runOnJS(finishClose)();
+              }
+            }
+          );
+        } else {
+          translateY.value = withSpring(0, {
+            damping: 24,
+            stiffness: 260,
+            velocity: event.velocityY,
+            overshootClamping: true,
+          });
+        }
+      });
+  }, [finishClose, sheetHeight, translateY]);
+
   const backdropStyle = useAnimatedStyle(() => ({
-    opacity: progress.value * 0.35,
+    opacity: 0.35 * (1 - Math.min(translateY.value / sheetHeight, 1)),
   }));
 
   const sheetStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: (1 - progress.value) * sheetHeight }],
+    transform: [{ translateY: translateY.value }],
   }));
 
   return (
@@ -84,12 +146,13 @@ export default function AddExpense() {
         <Animated.View style={[styles.backdrop, backdropStyle]} />
       </Pressable>
 
-      <Animated.View style={[styles.sheet, { height: sheetHeight }, sheetStyle]}>
+      <GestureDetector gesture={panGesture}>
+        <Animated.View style={[styles.sheet, { height: sheetHeight }, sheetStyle]}>
         <View style={styles.handleIndicator} />
         <View style={styles.topSection}>
           <View style={styles.header}>
             <Pressable onPress={handleClose} style={styles.closeButton}>
-              <ArrowLeft size={18} color={styles.closeIcon.color} />
+              <Text style={styles.closeIcon}>X</Text>
             </Pressable>
             <Text style={styles.headerTitle}>{title}</Text>
             <View style={styles.headerSpacer} />
@@ -146,7 +209,8 @@ export default function AddExpense() {
             )}
           </View>
         </View>
-      </Animated.View>
+        </Animated.View>
+      </GestureDetector>
     </View>
   );
 }
@@ -196,6 +260,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   closeIcon: {
+    fontSize: 18,
+    fontWeight: "700",
     color: "#1F1F1F",
   },
   headerTitle: {
@@ -332,3 +398,5 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 });
+
+
