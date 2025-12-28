@@ -41,6 +41,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     alignItems: "center",
     justifyContent: "space-between",
+    
   },
   name: {
     fontSize: 12,
