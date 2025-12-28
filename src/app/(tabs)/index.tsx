@@ -2,6 +2,7 @@ import { AppDrawer, useAppDrawer } from "@/src/components/homepage/AppDrawer";
 import { ExpenseGrid, type ExpenseItem } from "@/src/components/homepage/ExpenseGrid";
 import { TopBar } from "@/src/components/homepage/TopBar";
 import { SafeArea } from "@/src/components/SafeArea";
+import { useGuardedModalPush } from "@/src/hooks/guardForModals";
 import { Banknote, Bus, Coffee, Droplets, Film, ShoppingCart, Utensils } from "lucide-react-native";
 import { StyleSheet, Text, View } from "react-native";
 
@@ -66,6 +67,7 @@ const EXPENSES: ExpenseItem[] = [
 
 function HomeContent() {
   const drawer = useAppDrawer();
+  const { pushModal } = useGuardedModalPush();
 
   return (
     <>
@@ -78,21 +80,25 @@ function HomeContent() {
       <Text style={styles.expenseTotal}>
         Expense 47$
       </Text>
-      <ExpenseGrid items={EXPENSES} />
+      <ExpenseGrid
+        items={EXPENSES}
+        onPressItem={(item) =>
+          pushModal({
+            pathname: "/(modals)/addExpense",
+            params: { category: item.name },
+          })
+        }
+      />
     </>
   );
 }
 
-
-
-
 export default function HomeScreen() {
-
   return (
     <View style={styles.background}>
       <SafeArea>
         <AppDrawer>
-          <HomeContent/>
+          <HomeContent />
         </AppDrawer>
       </SafeArea>
     </View>
@@ -102,12 +108,11 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   background: {
     backgroundColor: "#ffffffff",
-    height: "100%"
+    height: "100%",
   },
-
   expenseTotal: {
     textAlign: "center",
     paddingTop: 4,
     paddingBottom: 4,
-  }
-})
+  },
+});

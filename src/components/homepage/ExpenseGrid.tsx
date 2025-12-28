@@ -15,9 +15,10 @@ export type ExpenseItem = {
 
 type ExpenseGridProps = {
   items: ExpenseItem[];
+  onPressItem?: (item: ExpenseItem) => void;
 };
 
-export function ExpenseGrid({ items }: ExpenseGridProps) {
+export function ExpenseGrid({ items, onPressItem }: ExpenseGridProps) {
   return (
     <FlatList
       data={items}
@@ -32,6 +33,7 @@ export function ExpenseGrid({ items }: ExpenseGridProps) {
             icon={item.icon}
             name={item.name}
             iconColor={item.iconColor}
+            onPress={() => onPressItem?.(item)}
           />
         </View>
       )}

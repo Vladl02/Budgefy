@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react-native";
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
 type ExpenseBoxProps = {
   amount: string | number;
@@ -9,6 +9,7 @@ type ExpenseBoxProps = {
   icon: LucideIcon;
   name: string;
   iconColor?: string;
+  onPress?: () => void;
 };
 
 export default function ExpenseBox({
@@ -18,15 +19,16 @@ export default function ExpenseBox({
   icon: Icon,
   name,
   iconColor = "#2E2E2E",
+  onPress,
 }: ExpenseBoxProps) {
   return (
-    <View style={[styles.container, { backgroundColor }]}>
+    <Pressable onPress={onPress} style={[styles.container, { backgroundColor }]}>
       <Text style={styles.name}>{name}</Text>
       <View style={[styles.iconCircle, { backgroundColor: circleColor }]}>
         <Icon size={20} color={iconColor} />
       </View>
       <Text style={styles.amount}>${amount}</Text>
-    </View>
+    </Pressable>
   );
 }
 
