@@ -5,7 +5,13 @@ import { SafeArea } from "@/src/components/SafeArea";
 import { useGuardedModalPush } from "@/src/hooks/guardForModals";
 import { Banknote, Bus, Coffee, Droplets, Film, ShoppingCart, Utensils } from "lucide-react-native";
 import { StyleSheet, Text, View } from "react-native";
-
+import { useFonts } from "expo-font";
+import {
+  Inter_400Regular,
+  Inter_500Medium,
+  Inter_600SemiBold,
+  Inter_700Bold,
+} from "@expo-google-fonts/inter";
 const EXPENSES: ExpenseItem[] = [
   {
     id: "coffee",
@@ -94,7 +100,23 @@ function HomeContent() {
   );
 }
 
+{/* Custom Text component to apply global font style */}
+export function AppText(props: any) {
+  return (
+    <Text {...props} style={[{ fontFamily: "Inter_600Bold" }, props.style]} />
+  );
+}
+
 export default function HomeScreen() {
+
+  const [fontsLoaded] = useFonts({
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+  })
+  if (!fontsLoaded) return null;
+
   return (
     <View style={styles.background}>
       <SafeArea>
