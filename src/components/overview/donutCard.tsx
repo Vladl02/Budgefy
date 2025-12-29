@@ -1,9 +1,14 @@
-import React, { useMemo } from "react";
-import { View, Text, StyleSheet, Pressable } from "react-native";
+import React, { useMemo, useRef, useState, useEffect } from "react";
+import { View, Text, StyleSheet, Pressable, LayoutAnimation, Platform, UIManager, Animated } from "react-native";
 import Svg, { G, Path } from "react-native-svg";
 import * as d3 from "d3-shape";
-import { Minimize2, Pencil } from "lucide-react-native";
+import { Minimize2, Maximize2, Pencil } from "lucide-react-native";
 import { CATEGORY_STYLES, IconKey } from "@/src/components/overview/category";
+// we enable LayoutAnimation on Android
+if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
 export type SummaryItem = {
   id: string;
   title: string;
@@ -21,6 +26,7 @@ type Props = {
 };
 
 export default function MonthlySummaryCard({
+
   label = "Monthly",
   items,
   daysInPeriod = 31,
@@ -39,12 +45,63 @@ const data = useMemo(
   [items]
 );
 
+  const [collapsed, setCollapsed] = useState(false);
+
+  // One Animated.Value per row (0 = hidden, 1 = shown)
+  const rowAnims = useRef(items.map(() => new Animated.Value(1))).current;
+
+  // If items length changes, ensure we have enough anim values
+  useEffect(() => {
+    if (rowAnims.length < items.length) {
+      for (let i = rowAnims.length; i < items.length; i++) {
+        rowAnims.push(new Animated.Value(collapsed ? 0 : 1));
+      }
+    }
+  }, [items.length, collapsed]);
+
+  //animate the minimize icon rotation
+    const animateRows = (toValue: 0 | 1, cb?: () => void) => {
+    const anims = rowAnims
+      .slice(0, items.length)
+      .map((a) =>
+        Animated.timing(a, {
+          toValue,
+          duration: 180,
+          useNativeDriver: true,
+        })
+      );
+
+    Animated.stagger(35, toValue === 1 ? anims : anims.reverse()).start(() => cb?.());
+  };
+
+  const handleLeftPress = () => {
+    if (!collapsed) {
+      // 1) animate rows out
+      animateRows(0, () => {
+        // 2) animate the card height change when rows are removed
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        setCollapsed(true);
+      });
+    } else {
+      // 1) animate the card height change when rows are added back
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setCollapsed(false);
+
+      // 2) then animate rows in
+      requestAnimationFrame(() => animateRows(1));
+    }
+  };
+
   return (
     <View style={styles.card}>
       {/* Top corner buttons */}
-      <Pressable style={styles.cornerBtn} onPress={onLeftPress} hitSlop={10}>
+    <Pressable style={styles.cornerBtn} onPress={handleLeftPress} hitSlop={10}>
+      {collapsed ? (
+        <Maximize2 size={14} color="#5E6C37" strokeWidth={2.5} />
+      ) : (
         <Minimize2 size={14} color="#5E6C37" strokeWidth={2.5} />
-      </Pressable>
+      )}
+    </Pressable>
 
       <Pressable style={[styles.cornerBtn, { right: 16, left: undefined }]} onPress={onRightPress} hitSlop={10}>
         <Pencil size={14} color="#5E6C37" strokeWidth={2.5} />
@@ -62,24 +119,38 @@ const data = useMemo(
       </View>
 
       {/* Rows */}
-      <View>
-        {items.map((item) => {
-          const pct = total > 0 ? (item.budget / total) * 100 : 0;
-          const Icon = CATEGORY_STYLES[item.icon].Icon;
+      {!collapsed && (
+        <View>
+          {items.map((item, idx) => {
+            const pct = total > 0 ? (item.budget / total) * 100 : 0;
+            const Icon = CATEGORY_STYLES[item.icon].Icon;
 
-          return (
-            <View key={item.id} style={styles.row}>
-              <View style={styles.rowLeft}>
-                <Icon size={24} color={CATEGORY_STYLES[item.icon].color} strokeWidth={2.5} />
-                <Text style={styles.rowTitle}>{item.title}</Text>
-                <Text style={styles.rowPct}>{pct.toFixed(2)}%</Text>
-              </View>
+            const anim = rowAnims[idx];
+            const opacity = anim;
+            const translateY = anim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [-8, 0],
+            });
 
-              <Text style={styles.rowAmount}>${formatMoney(item.budget)}</Text>
-            </View>
-          );
-        })}
-      </View>
+            return (
+              <Animated.View
+                key={item.id}
+                style={{ opacity, transform: [{ translateY }] }}
+              >
+                <View style={styles.row}>
+                  <View style={styles.rowLeft}>
+                    <Icon size={24} color={CATEGORY_STYLES[item.icon].color} strokeWidth={2.5} />
+                    <Text style={styles.rowTitle}>{item.title}</Text>
+                    <Text style={styles.rowPct}>{pct.toFixed(2)}%</Text>
+                  </View>
+
+                  <Text style={styles.rowAmount}>${formatMoney(item.budget)}</Text>
+                </View>
+              </Animated.View>
+            );
+          })}
+        </View>
+      )}
     </View>
   );
 }

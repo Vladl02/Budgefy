@@ -79,18 +79,35 @@ export default function CategoryCard({ title, spent, budget, icon }: CategoryCar
         </Text>
       </View>
 
-      {/* Progress bar */}
-      <View style={[styles.progressTrack, { backgroundColor: `rgba(${color.slice(1).match(/.{2}/g)?.map((hex) => parseInt(hex, 16)).join(", ")}, 0.25)` }]}>
-        <View
-            style={[
-            styles.progressFill,
-            {
-                width: `${progress * 100}%`,
-                backgroundColor: color,
-            },
-            ]}
-        />
-        </View>
+      <View style={styles.progressWrapper}>
+  {/* Glow layer */}
+  <View
+    style={[
+      styles.progressGlow,
+      {
+        width: `${progress * 100}%`,
+        backgroundColor: color,
+        shadowColor: color,
+        shadowRadius: progress > 0.9 ? 14 : 8,
+        shadowOpacity: progress > 0.9 ? 1 : 0.8,
+      },
+    ]}
+  />
+
+  {/* Actual bar */}
+  <View style={styles.progressTrack}>
+    <View
+      style={[
+        styles.progressFill,
+        {
+          width: `${progress * 100}%`,
+          backgroundColor: color,
+          opacity: progress < 0.9 ? 0.8 : 1,
+        },
+      ]}
+    />
+  </View>
+      </View>
     </View>
   );
 }
@@ -166,19 +183,39 @@ const styles = StyleSheet.create({
   metaBold: {
     fontWeight: "900",
   },
-
-  progressTrack: {
-    height: 8,
-    borderRadius: 999,
-    overflow: "hidden",
-  },
-
-  progressFill: {
-    height: "100%",
-    borderRadius: 999,
-    backgroundColor: "#FE5A59",
-  },
   remainingZero: {
   color: "#FF3B30", // iOS 
+},
+progressWrapper: {
+  position: "relative",
+  height: 12,
+  justifyContent: "center",
+  marginTop: 6,
+},
+
+progressGlow: {
+  position: "absolute",
+  height: 8,
+  borderRadius: 999,
+
+  // iOS glow
+  shadowOffset: { width: 0, height: 0 },
+  shadowOpacity: 0.8,
+  shadowRadius: 4,
+
+  // Android glow (best possible)
+  elevation: 8,
+},
+
+progressTrack: {
+  height: 8,
+  borderRadius: 999,
+  backgroundColor: "#EEE",
+  overflow: "hidden",
+},
+
+progressFill: {
+  height: "100%",
+  borderRadius: 999,
 },
 });
