@@ -1,25 +1,24 @@
 import { useNavigation } from "@react-navigation/native";
 import { router, useLocalSearchParams } from "expo-router";
 import { Check } from "lucide-react-native";
-import React, { useCallback, useEffect, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { BackHandler, Dimensions, Pressable, StyleSheet, Text, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   Easing,
-  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
   withTiming,
 } from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { CurrencySheet } from "../../components/CurrencySheet";
 
 type ProgressBarProps = {
   spent: number;
   total: number;
 };
-
-
 
 function ProgressBar({ spent, total }: ProgressBarProps) {
   const safeTotal = total > 0 ? total : 0;
@@ -53,6 +52,12 @@ export default function AddExpense() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const title = categoryName ?? "Shopping";
+  const [currencySheetOpen, setCurrencySheetOpen] = useState(false);
+  const [currency, setCurrency] = useState("RON");
+  const keypadKeys = useMemo(
+    () => ["7", "8", "9", "X", "4", "5", "6", "+/-", "1", "2", "3", "x/%", "CURRENCY", "0", ".", ">"],
+    []
+  );
   //const sheetHeight = useMemo(() => Math.round(Dimensions.get("window").height * 0.90), []);
   const sheetHeight = Dimensions.get("screen").height * 0.9;
   const translateY = useSharedValue(sheetHeight);
@@ -76,11 +81,23 @@ export default function AddExpense() {
       { duration: 220, easing: Easing.in(Easing.cubic) },
       (finished) => {
         if (finished) {
-          runOnJS(finishClose)();
+          scheduleOnRN(finishClose);
         }
       }
     );
   }, [finishClose, sheetHeight, translateY]);
+
+  const handleOpenCurrencySheet = useCallback(() => {
+    setCurrencySheetOpen(true);
+  }, []);
+
+  const handleDismissCurrencySheet = useCallback(() => {
+    setCurrencySheetOpen(false);
+  }, []);
+
+  const handleSelectCurrency = useCallback((nextCurrency: string) => {
+    setCurrency(nextCurrency);
+  }, []);
 
   useEffect(() => {
     translateY.value = sheetHeight;
@@ -117,7 +134,7 @@ export default function AddExpense() {
             },
             (finished) => {
               if (finished) {
-                runOnJS(finishClose)();
+                scheduleOnRN(finishClose);
               }
             }
           );
@@ -148,69 +165,84 @@ export default function AddExpense() {
 
       <GestureDetector gesture={panGesture}>
         <Animated.View style={[styles.sheet, { height: sheetHeight }, sheetStyle]}>
-        <View style={styles.handleIndicator} />
-        <View style={styles.topSection}>
-          <View style={styles.header}>
-            <Pressable onPress={handleClose} style={styles.closeButton}>
-              <Text style={styles.closeIcon}>X</Text>
-            </Pressable>
-            <Text style={styles.headerTitle}>{title}</Text>
-            <View style={styles.headerSpacer} />
-          </View>
-
-          <View style={styles.formArea}>
-            <View style={styles.amountBox}>
-              <Text style={styles.amountText}>RON0</Text>
+          <View style={styles.handleIndicator} />
+          <View style={styles.topSection}>
+            <View style={styles.header}>
+              <Pressable onPress={handleClose} style={styles.closeButton}>
+                <Text style={styles.closeIcon}>X</Text>
+              </Pressable>
+              <Text style={styles.headerTitle}>{title}</Text>
+              <View style={styles.headerSpacer} />
             </View>
-            <View style={styles.productBox}>
-              <Text style={styles.productText}>Product Name</Text>
-            </View>
-          </View>
-        </View>
 
-        <View style={[styles.bottomSection, { paddingBottom: 20 + insets.bottom }]}>
-          <ProgressBar spent={20} total={200} />
-
-          <View style={styles.tagsRow}>
-            <View style={[styles.tag, styles.tagMuted]}>
-              <Text style={styles.tagText}>+</Text>
-            </View>
-            {["Tucano", "Careffour", "Esushi", "KFC", "Altex"].map((label) => (
-              <View key={label} style={styles.tag}>
-                <Text style={styles.tagText}>{label}</Text>
+            <View style={styles.formArea}>
+              <View style={styles.amountBox}>
+                <Text style={styles.amountText}>RON0</Text>
               </View>
-            ))}
-            <View style={[styles.tag, styles.tagMuted]}>
-              <Text style={styles.tagText}>O</Text>
+              <View style={styles.productBox}>
+                <Text style={styles.productText}>Product Name</Text>
+              </View>
             </View>
           </View>
 
-          <View style={styles.keypad}>
-            {["7", "8", "9", "X", "4", "5", "6", "+/-", "1", "2", "3", "x/%", "RON", "0", ".", ">"].map(
-              (key) => (
-                <View
-                  key={key}
-                  style={[
-                    styles.key,
-                    key === ">" ? styles.keyAccent : null,
-                    key === "RON" ? styles.keyDouble : null,
-                  ]}
-                >
-                  {key === ">" ? (
-                    <Check size={18} color={styles.keyTextAccent.color} />
-                  ) : (
-                    <Text style={[styles.keyText, key === ">" ? styles.keyTextAccent : null]}>
-                      {key}
-                    </Text>
-                  )}
-                  {key === "RON" ? <Text style={styles.keySubText}>RON</Text> : null}
+          <View style={[styles.bottomSection, { paddingBottom: 20 + insets.bottom }]}>
+            <ProgressBar spent={20} total={200} />
+
+            <View style={styles.tagsRow}>
+              <View style={[styles.tag, styles.tagMuted]}>
+                <Text style={styles.tagText}>+</Text>
+              </View>
+              {["Tucano", "Careffour", "Esushi", "KFC", "Altex"].map((label) => (
+                <View key={label} style={styles.tag}>
+                  <Text style={styles.tagText}>{label}</Text>
                 </View>
-              )
-            )}
+              ))}
+              <View style={[styles.tag, styles.tagMuted]}>
+                <Text style={styles.tagText}>O</Text>
+              </View>
+            </View>
+
+            <View style={styles.keypad}>
+              {keypadKeys.map((key) => {
+                const isCurrencyKey = key === "CURRENCY";
+                const isConfirmKey = key === ">";
+
+                if (isCurrencyKey) {
+                  return (
+                    <Pressable
+                      key={key}
+                      style={[styles.key, styles.keyDouble]}
+                      onPress={handleOpenCurrencySheet}
+                    >
+                      <Text style={styles.keyText}>{currency}</Text>
+                      <Text style={styles.keySubText}>Currency</Text>
+                    </Pressable>
+                  );
+                }
+
+                return (
+                  <View key={key} style={[styles.key, isConfirmKey ? styles.keyAccent : null]}>
+                    {isConfirmKey ? (
+                      <Check size={18} color={styles.keyTextAccent.color} />
+                    ) : (
+                      <Text style={[styles.keyText, isConfirmKey ? styles.keyTextAccent : null]}>
+                        {key}
+                      </Text>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
           </View>
-        </View>
         </Animated.View>
       </GestureDetector>
+
+      <CurrencySheet
+        visible={currencySheetOpen}
+        onDismiss={handleDismissCurrencySheet}
+        onSelect={handleSelectCurrency}
+        selectedCurrency={currency}
+      />
     </View>
   );
 }
@@ -398,5 +430,3 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 });
-
-
