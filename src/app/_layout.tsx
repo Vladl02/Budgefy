@@ -45,6 +45,46 @@ export default function RootLayout() {
                 animation: "none",
               }}
             />
+            <Stack.Screen
+              name="(modals)/(settings)/language"
+              options={{ 
+                presentation: "transparentModal",
+                title: "Language",
+                animation: "none",
+              }}
+            />
+            <Stack.Screen
+              name="(modals)/(settings)/currency"
+              options={{ 
+                presentation: "transparentModal",
+                title: "Currency",
+                animation: "none",
+              }}
+            />
+            <Stack.Screen
+              name="(modals)/(settings)/startdate"
+              options={{ 
+                presentation: "transparentModal",
+                title: "Start Date",
+                animation: "none",
+              }}
+            />
+            <Stack.Screen
+              name="(modals)/(settings)/recurringexpense"
+              options={{ 
+                presentation: "transparentModal",
+                title: "Recurring Expense",
+                animation: "none",
+              }}
+            />
+            <Stack.Screen
+              name="(modals)/(settings)/savingsmanager"
+              options={{ 
+                presentation: "transparentModal",
+                title: "Recurring Expense",
+                animation: "none",
+              }}
+            />
           </Stack>
         </Suspense>
       </BottomSheetModalProvider>

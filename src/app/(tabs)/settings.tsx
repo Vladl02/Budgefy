@@ -18,12 +18,52 @@ import { Diamond,
         } from 'lucide-react-native';
 
 import * as ImagePicker from 'expo-image-picker';
+import { SlidingSheet } from '@/src/components/SlidingSheet';
+import { FlatList } from 'react-native-gesture-handler';
+import { useGuardedModalPush } from '@/src/hooks/guardForModals';
 
 
 export default function Settings() {
 
-
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  //sheet options
+  const [sheetVisible, setSheetVisible] = useState(false);
+  const [activeOption, setActiveOption] = useState<string | null>(null);
+  const closeSheet = () => setSheetVisible(false);
+  const [name, setName] = useState("John Doe");
+  const [editingName, setEditingName] = useState(false);
+  const prevNameRef = useRef(name);
+  const { pushModal } = useGuardedModalPush();
+
+  const languages = [
+    { code: 'en', name: 'English' },
+    { code: 'es', name: 'Spanish' },
+    { code: 'fr', name: 'French' },
+    { code: 'de', name: 'German' },
+    { code: 'zh', name: 'Chinese' },
+    { code: 'ja', name: 'Japanese' },
+    { code: 'ru', name: 'Russian' },
+    { code: 'ar', name: 'Arabic' },
+    { code: 'hi', name: 'Hindi' },
+    { code: 'pt', name: 'Portuguese' },
+    { code: 'it', name: 'Italian' },
+    { code: 'ko', name: 'Korean' },
+    { code: 'nl', name: 'Dutch' },
+    { code: 'sv', name: 'Swedish' },
+    { code: 'tr', name: 'Turkish' },
+    { code: 'pl', name: 'Polish' },
+    { code: 'vi', name: 'Vietnamese' },
+    { code: 'id', name: 'Indonesian' },
+    // Add more languages as needed
+];
+
+
+  const openSheet = (option: string) => {
+    setActiveOption(option);
+    setSheetVisible(true);
+  };
+
+  // Function to pick an avatar image
   const pickAvatar = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
@@ -43,10 +83,6 @@ export default function Settings() {
     }
   };
 
-  const [name, setName] = useState("John Doe");
-  const [editingName, setEditingName] = useState(false);
-
-  const prevNameRef = useRef(name);
 
   const beginEditName = () => {
     prevNameRef.current = name;
@@ -66,11 +102,105 @@ export default function Settings() {
     Keyboard.dismiss();
   };
 
+  // Helper to render the sheet content based on activeOption
+  const renderSheetContent = (close: () => void) => {
+    switch (activeOption) {
+      case "Category Manager":
+        return (
+          <View style={{ padding: 20 }}>
+            <Text style={{ fontSize: 18, fontWeight: "600", alignSelf: "center" }}>Category Manager</Text>
+            <Text style={{ marginTop: 8, alignSelf: "center"}}>Arrange your categories here.</Text>
+            <Pressable onPress={close} style={{ marginTop: 20, alignSelf: "flex-end" }}>
+              <Text>Close</Text>
+            </Pressable>
+          </View>
+        );
+
+      case "Budget Manager":
+        return (
+          <View style={{ padding: 20 }}>
+            <Text style={{ fontSize: 18, fontWeight: "600",alignSelf: "center" }}>Budget Manager</Text>
+            <Text style={{ marginTop: 8,alignSelf: "center" }}>Configure your budgets here.</Text>
+            <Pressable onPress={close} style={{ marginTop: 20, alignSelf: "flex-end" }}>
+              <Text>Close</Text>
+            </Pressable>
+          </View>
+        );
+
+      case "Saving Manager":
+        return (
+          <View style={{ padding: 20 }}>
+            <Text style={{ fontSize: 18, fontWeight: "600",alignSelf: "center" }}>Saving Manager</Text>
+            <Text style={{ marginTop: 8,alignSelf: "center" }}>Manage your savings goals.</Text>
+            <Pressable onPress={close} style={{ marginTop: 20, alignSelf: "flex-end" }}>
+              <Text>Close</Text>
+            </Pressable>
+          </View>
+        );
+
+      case "Recurring Payments":
+        return (
+          <View style={{ padding: 20 }}>
+            <Text style={{ fontSize: 18, fontWeight: "600", alignSelf: "center" }}>Recurring Payments</Text>
+            <Text style={{ marginTop: 8, alignSelf: "center" }}>View and edit recurring payments.</Text>
+            <Pressable onPress={close} style={{ marginTop: 20, alignSelf: "flex-end" }}>
+              <Text>Close</Text>
+            </Pressable>
+          </View>
+        );
+
+      case "Start Date":
+        return (
+          <View style={{ padding: 20 }}>
+            <Text style={{ fontSize: 18, fontWeight: "600", alignSelf: "center" }}>Start Date</Text>
+            <Text style={{ marginTop: 8, alignSelf: "center" }}>Select your financial period start date.</Text>
+            <Pressable onPress={close} style={{ marginTop: 20, alignSelf: "flex-end" }}>
+              <Text>Close</Text>
+            </Pressable>
+          </View>
+        );
+
+      case "Base Currency":
+        return (
+          <View style={{ padding: 20 }}>
+            <Text style={{ fontSize: 18, fontWeight: "600", alignSelf: "center" }}>Base Currency</Text>
+            <Text style={{ marginTop: 8, alignSelf: "center" }}>Choose your default currency.</Text>
+            <Pressable onPress={close} style={{ marginTop: 20, alignSelf: "flex-end" }}>
+              <Text>Close</Text>
+            </Pressable>
+          </View>
+        );
+
+      case "Language":
+        return (
+          <View style={{ padding: 20 }}>
+            <Text style={{ fontSize: 18, fontWeight: "600", alignSelf: "center" }}>Language</Text>
+            <Text style={{ marginTop: 8, alignSelf: "center" }}>Select your app language.</Text>
+            <FlatList
+                    data={languages}
+                    keyExtractor={(item) => item.code}
+                    renderItem={({ item }) => <Text>{item.code}{item.name}</Text>}
+                  />
+          </View>
+        );
+
+      default:
+        return (
+          <View style={{ padding: 20 }}>
+            <Text style={{ fontSize: 18, fontWeight: "600" }}>{activeOption}</Text>
+            <Text style={{ marginTop: 8 }}>No content defined yet.</Text>
+            <Pressable onPress={close} style={{ marginTop: 20, alignSelf: "flex-end" }}>
+              <Text>Close</Text>
+            </Pressable>
+          </View>
+        );
+    }
+  };
+
   return (
-  <SafeArea>
     <ScrollView>
     <Pressable style={{ flex: 1 }} onPress={Keyboard.dismiss}>
-    <Text style={{alignSelf: 'center'}}>Settings Screen</Text>
+    <View style={{marginTop: 50}}/>
     {/* User Card */}
     <View style={styles.userCard}>
       <View style={styles.profileSection}>
@@ -134,49 +264,71 @@ export default function Settings() {
           <Text style={styles.upgrade}>Upgrade To Pro</Text>
       </View>
     </View>
-    
+    {/* Options Section */}
     <View style={styles.optionsSection}>
-        <View style={styles.optionCard}>
-          <ChartColumnStacked style = {styles.optionIcon} color="#57A7FD" strokeWidth={3}/>
+        {/* Category Manager */}
+        <Pressable style={styles.optionCard} onPress={() => openSheet("Category Manager")}>
+          <ChartColumnStacked style={styles.optionIcon} color="#57A7FD" strokeWidth={3}/>
           <Text style={styles.optionText}>Category Manager</Text>
           <ChevronRight size={18} style={styles.optionChevron} />
-        </View>
-        <View style={styles.optionCard}>
-          <CreditCard style = {styles.optionIcon} color="#FE5A59" strokeWidth={3}/>
+        </Pressable>
+          {/* Budget Manager */}
+        <Pressable style={styles.optionCard} onPress={() => openSheet("Budget Manager")}>
+          <CreditCard style={styles.optionIcon} color="#FE5A59" strokeWidth={3}/>
           <Text style={styles.optionText}>Budget Manager</Text>
           <ChevronRight size={18} style={styles.optionChevron} />
-        </View>
-        <View style={styles.optionCard}>
+        </Pressable>
+          {/* Saving Manager */}
+        <Pressable style={styles.optionCard} onPress={() => pushModal({
+            pathname: "/(modals)/(settings)/savingsmanager",
+          })}>
           <PiggyBank style = {styles.optionIcon} color="#FFC83C" strokeWidth={3}/>
           <Text style={styles.optionText}>Saving Manager</Text>
           <ChevronRight size={18} style={styles.optionChevron} />
-        </View>
-        <View style={styles.optionCard}>
+        </Pressable>
+          {/* Recurring Payments */}
+        <Pressable style={styles.optionCard} onPress={() => pushModal({
+            pathname: "/(modals)/(settings)/recurringexpense",
+          })}>
           <Repeat style = {styles.optionIcon} color="#00DDB7" strokeWidth={3}/>
           <Text style={styles.optionText}>Recurring Payments</Text>
           <ChevronRight size={18} style={styles.optionChevron} />
-        </View>
-        <View style={styles.optionCard}>
+        </Pressable>
+          {/* Start Date */}
+        <Pressable style={styles.optionCard} onPress={() => pushModal({
+            pathname: "/(modals)/(settings)/startdate",
+          })}>
           <Calendar style = {styles.optionIcon} color="#C48FEE" strokeWidth={3}/>
           <Text style={styles.optionText}>Start Date</Text>
           <ChevronRight size={18} style={styles.optionChevron} />
-        </View>
-        <View style={styles.optionCard}>
+        </Pressable>
+          {/* Base Currency */}
+        <Pressable style={styles.optionCard} onPress={() => pushModal({
+            pathname: "/(modals)/(settings)/currency",
+          })}>
           <DollarSign style = {styles.optionIcon} color="#FF8544" strokeWidth={3}/>
           <Text style={styles.optionText}>Base Currency</Text>
           <ChevronRight size={18} style={styles.optionChevron} />
-        </View>
-        <View style={styles.optionCard}>
+        </Pressable>
+          {/* Language */}
+        <Pressable style={styles.optionCard} onPress={() => pushModal({
+            pathname: "/(modals)/(settings)/language",
+          })}>
           <Languages style = {styles.optionIcon} color="#7E57FF" strokeWidth={3}/>
           <Text style={styles.optionText}>Language</Text>
           <ChevronRight size={18} style={styles.optionChevron} />
-        </View>
+        </Pressable>
+
     </View>
         <View style={{marginBottom: 50}}></View>
+        {sheetVisible && (
+          <SlidingSheet onDismiss={closeSheet} heightPercent={0.9}>
+            {(close) => renderSheetContent(close)}
+          </SlidingSheet>
+        )}
 
     </Pressable>
     </ScrollView>
-  </SafeArea>
   );
 }
 
