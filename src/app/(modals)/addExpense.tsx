@@ -1,8 +1,8 @@
 import { useNavigation } from "@react-navigation/native";
 import { router, useLocalSearchParams } from "expo-router";
-import { Check } from "lucide-react-native";
+import { Check, Delete, Equal } from "lucide-react-native";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { BackHandler, Dimensions, Pressable, StyleSheet, Text, View } from "react-native";
+import { BackHandler, Dimensions, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   Easing,
@@ -11,14 +11,16 @@ import Animated, {
   withSpring,
   withTiming,
 } from "react-native-reanimated";
-import { scheduleOnRN } from "react-native-worklets";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { scheduleOnRN } from "react-native-worklets";
 import { CurrencySheet } from "../../components/CurrencySheet";
 
 type ProgressBarProps = {
   spent: number;
   total: number;
 };
+
+type CalcOperator = "add" | "subtract" | "multiply" | "divide";
 
 function ProgressBar({ spent, total }: ProgressBarProps) {
   const safeTotal = total > 0 ? total : 0;
@@ -51,11 +53,18 @@ export default function AddExpense() {
   const categoryName = Array.isArray(category) ? category[0] : category;
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const title = categoryName ?? "Shopping";
+  const title = categoryName ?? "Unknown";
   const [currencySheetOpen, setCurrencySheetOpen] = useState(false);
   const [currency, setCurrency] = useState("RON");
+  const [readyCalcState, setReadyCalcState] = useState(true);
+  const [inputValue, setInputValue] = useState("");
+  const [storedValue, setStoredValue] = useState<number | null>(null);
+  const [storedDisplay, setStoredDisplay] = useState("");
+  const [pendingOperator, setPendingOperator] = useState<CalcOperator | null>(null);
+  const [productName, setProductName] = useState("");
+
   const keypadKeys = useMemo(
-    () => ["7", "8", "9", "X", "4", "5", "6", "+/-", "1", "2", "3", "x/%", "CURRENCY", "0", ".", ">"],
+    () => ["7", "8", "9", "X", "4", "5", "6", "+/-", "1", "2", "3", "*/%", "CURRENCY", "0", ".", ">"],
     []
   );
   //const sheetHeight = useMemo(() => Math.round(Dimensions.get("window").height * 0.90), []);
@@ -98,6 +107,180 @@ export default function AddExpense() {
   const handleSelectCurrency = useCallback((nextCurrency: string) => {
     setCurrency(nextCurrency);
   }, []);
+
+  const formatValue = useCallback((value: number) => {
+    if (!Number.isFinite(value)) return "0";
+    const rounded = Math.round((value + Number.EPSILON) * 100) / 100;
+    return rounded.toFixed(2).replace(/\.?0+$/, "");
+  }, []);
+
+  const operatorSymbol = useMemo(() => {
+    switch (pendingOperator) {
+      case "add":
+        return "+";
+      case "subtract":
+        return "-";
+      case "multiply":
+        return "×";
+      case "divide":
+        return "÷";
+      default:
+        return "";
+    }
+  }, [pendingOperator]);
+
+  const displayValue = useMemo(() => {
+    const left = storedDisplay !== "" ? storedDisplay : storedValue !== null ? String(storedValue) : "";
+    if (pendingOperator && storedValue !== null) {
+      if (inputValue !== "") {
+        return `${left}${operatorSymbol}${inputValue}`;
+      }
+      return `${left}${operatorSymbol}`.trim();
+    }
+    if (inputValue !== "") return inputValue;
+    if (storedValue !== null) return left;
+    return "0";
+  }, [inputValue, operatorSymbol, pendingOperator, storedDisplay, storedValue]);
+
+  const applyOperation = useCallback((left: number, operator: CalcOperator, right: number) => {
+    switch (operator) {
+      case "add":
+        return left + right;
+      case "subtract":
+        return left - right;
+      case "multiply":
+        return left * right;
+      case "divide":
+        return right === 0 ? left : left / right;
+      default:
+        return left;
+    }
+  }, []);
+
+  const resolveOperation = useCallback((key: string, currentOperator: CalcOperator | null) => {
+    if (key === "+/-") {
+      return currentOperator === "add" ? "subtract" : "add";
+    }
+    if (key === "*/%") {
+      return currentOperator === "multiply" ? "divide" : "multiply";
+    }
+    return null;
+  }, []);
+
+  const handleDigitPress = useCallback((digit: string) => {
+    setInputValue((prev) => {
+      let next = prev;
+      if (digit === ".") {
+        if (next === "") return "0.";
+        if (next.includes(".")) return next;
+        return `${next}.`;
+      }
+      if (next === "0") return digit;
+      return `${next}${digit}`;
+    });
+  }, []);
+
+  const handleBackspace = useCallback(() => {
+    if (inputValue !== "") {
+      setInputValue((prev) => {
+        if (prev === "") return prev;
+        const trimmed = prev.slice(0, -1);
+        if (trimmed === "-" || trimmed === "") return "";
+        return trimmed;
+      });
+      return;
+    }
+
+    if (pendingOperator) {
+      const fallback =
+        storedDisplay !== "" ? storedDisplay : storedValue !== null ? String(storedValue) : "";
+      setPendingOperator(null);
+      setReadyCalcState(true);
+      if (fallback !== "") {
+        setInputValue(fallback);
+        setStoredValue(null);
+        setStoredDisplay("");
+      }
+    }
+  }, [inputValue, pendingOperator, storedDisplay, storedValue]);
+
+  const handleOperationPress = useCallback(
+    (key: string) => {
+      const nextOperator = resolveOperation(key, pendingOperator);
+      if (!nextOperator) return;
+
+      const hasInput = inputValue !== "";
+      if (storedValue === null) {
+        if (!hasInput) return;
+        setStoredValue(Number(inputValue));
+        setStoredDisplay(inputValue);
+        setInputValue("");
+        setPendingOperator(nextOperator);
+        setReadyCalcState(false);
+        return;
+      }
+
+      if (!pendingOperator) {
+        if (hasInput) {
+          setStoredValue(Number(inputValue));
+          setStoredDisplay(inputValue);
+          setInputValue("");
+        }
+        setPendingOperator(nextOperator);
+        setReadyCalcState(false);
+        return;
+      }
+
+      if (!hasInput) {
+        setPendingOperator(nextOperator);
+        setReadyCalcState(false);
+        return;
+      }
+
+      const result = applyOperation(storedValue, pendingOperator, Number(inputValue));
+      setStoredValue(result);
+      setStoredDisplay(formatValue(result));
+      setInputValue("");
+      setPendingOperator(nextOperator);
+      setReadyCalcState(false);
+    },
+    [applyOperation, inputValue, pendingOperator, resolveOperation, storedValue]
+  );
+
+  const handleEqualsPress = useCallback(() => {
+    if (!pendingOperator || storedValue === null || inputValue === "") return;
+    const result = applyOperation(storedValue, pendingOperator, Number(inputValue));
+    setStoredValue(null);
+    setStoredDisplay("");
+    setPendingOperator(null);
+    setInputValue(formatValue(result));
+    setReadyCalcState(true);
+  }, [applyOperation, formatValue, inputValue, pendingOperator, storedValue]);
+
+  const handleKeyPress = useCallback(
+    (key: string) => {
+      if (key === "CURRENCY") {
+        handleOpenCurrencySheet();
+        return;
+      }
+      if (key === ">") {
+        handleEqualsPress();
+        return;
+      }
+      if (key === "X") {
+        handleBackspace();
+        return;
+      }
+      if (key === "+/-" || key === "x/%" || key === "*/%") {
+        handleOperationPress(key);
+        return;
+      }
+      if (/^\d$/.test(key) || key === ".") {
+        handleDigitPress(key);
+      }
+    },
+    [handleBackspace, handleDigitPress, handleEqualsPress, handleOpenCurrencySheet, handleOperationPress]
+  );
 
   useEffect(() => {
     translateY.value = sheetHeight;
@@ -177,10 +360,16 @@ export default function AddExpense() {
 
             <View style={styles.formArea}>
               <View style={styles.amountBox}>
-                <Text style={styles.amountText}>RON0</Text>
+                <Text style={styles.amountText}>RON {displayValue}</Text>
               </View>
               <View style={styles.productBox}>
-                <Text style={styles.productText}>Product Name</Text>
+                <TextInput
+                  value={productName}
+                  onChangeText={setProductName}
+                  placeholder="Product Name"
+                  placeholderTextColor="#777777"
+                  style={styles.productInput}
+                />
               </View>
             </View>
           </View>
@@ -206,13 +395,14 @@ export default function AddExpense() {
               {keypadKeys.map((key) => {
                 const isCurrencyKey = key === "CURRENCY";
                 const isConfirmKey = key === ">";
+                const displayLabel = key === "*/%" ? "×/÷" : key;
 
                 if (isCurrencyKey) {
                   return (
                     <Pressable
                       key={key}
                       style={[styles.key, styles.keyDouble]}
-                      onPress={handleOpenCurrencySheet}
+                      onPress={() => handleKeyPress(key)}
                     >
                       <Text style={styles.keyText}>{currency}</Text>
                       <Text style={styles.keySubText}>Currency</Text>
@@ -221,15 +411,25 @@ export default function AddExpense() {
                 }
 
                 return (
-                  <View key={key} style={[styles.key, isConfirmKey ? styles.keyAccent : null]}>
+                  <Pressable
+                    key={key}
+                    onPress={() => handleKeyPress(key)}
+                    style={[styles.key, isConfirmKey ? styles.keyAccent : null]}
+                  >
                     {isConfirmKey ? (
-                      <Check size={18} color={styles.keyTextAccent.color} />
+                      readyCalcState ? (
+                        <Check size={18} color={styles.keyTextAccent.color} />
+                      ) : (
+                        <Equal size={18} color={styles.keyTextAccent.color} />
+                      )
+                    ) : key === "X" ? (
+                      <Delete size={18} color={styles.keyText.color} />
                     ) : (
                       <Text style={[styles.keyText, isConfirmKey ? styles.keyTextAccent : null]}>
-                        {key}
+                        {displayLabel}
                       </Text>
                     )}
-                  </View>
+                  </Pressable>
                 );
               })}
             </View>
@@ -330,20 +530,21 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     alignItems: "center",
   },
-  productText: {
+  productInput: {
+    width: "100%",
+    textAlign: "center",
     fontSize: 14,
     color: "#555555",
   },
   bottomSection: {
     marginTop: "auto",
-    backgroundColor: "#C9C9C9",
+    backgroundColor: "#ffffffff",
     paddingBottom: 16,
   },
   progressBar: {
     backgroundColor: "#F1D6D6",
     paddingVertical: 6,
     paddingHorizontal: 12,
-    borderRadius: 8,
     overflow: "hidden",
   },
   progressFill: {
@@ -400,6 +601,9 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     paddingHorizontal: 5,
     justifyContent: "space-between",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    paddingTop: 8,
   },
   key: {
     width: "23%",
