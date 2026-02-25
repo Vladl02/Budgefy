@@ -223,9 +223,10 @@ export default function SavingsManager() {
       {/* --- MODAL: MANAGE FUNDS --- */}
       <Modal visible={!!selectedGoal} animationType="fade" transparent>
         <KeyboardAvoidingView 
-          behavior={Platform.OS === "ios" ? "padding" : "height"} 
-          style={styles.modalOverlay}
-        >
+                behavior={Platform.OS === "ios" ? "padding" : "padding"} // Try 'padding' for both first
+                style={styles.modalOverlay}
+                keyboardVerticalOffset={Platform.OS === "ios" ? 0 : -100} // Adjust if needed
+                >
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <View>

@@ -3,7 +3,7 @@ import { PlatformPressable, Text } from "@react-navigation/elements";
 import { useTheme } from "@react-navigation/native";
 import { ChartPie, House, ScanLine, Scroll, Settings, X } from "lucide-react-native";
 import { useState } from "react";
-import { Modal, StyleSheet, View } from "react-native";
+import { Modal, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const ICONS_BY_ROUTE = {
@@ -36,8 +36,8 @@ export function MyTabBar({ state, descriptors, navigation }: BottomTabBarProps) 
         const isCenter = route.name === "scan";
         const isCenterActive = isCenter ? true : isFocused;
         const Icon = ICONS_BY_ROUTE[route.name as keyof typeof ICONS_BY_ROUTE];
-        const iconColor = isCenter || isFocused ? "#3B3B3B" : "#8A8A8A";
-        const labelColor = isCenter || isFocused ? "#2E2E2E" : "#7A7A7A";
+        const iconColor = isCenter || isFocused ? "#ffffffff" : "#000000ff";
+        const labelColor = isCenter || isFocused ? "#ffffffff" : "#000000ff";
         
         const labelNode =
           typeof label === "function"
@@ -76,21 +76,19 @@ export function MyTabBar({ state, descriptors, navigation }: BottomTabBarProps) 
         };
 
         return (
-          <PlatformPressable
-            key={route.key}
-            accessibilityState={isFocused ? { selected: true } : {}}
-            accessibilityLabel={options.tabBarAccessibilityLabel}
-            testID={options.tabBarButtonTestID}
-            onPress={onPress}
-            onLongPress={onLongPress}
-            style={[styles.tabItem, isCenter && styles.tabItemCenter]}
-          >
-            <View
-              style={[
+          <View key={route.key} style={[styles.tabItem, isCenter && styles.tabItemCenter]}>
+            <Pressable
+              accessibilityState={isFocused ? { selected: true } : {}}
+              accessibilityLabel={options.tabBarAccessibilityLabel}
+              testID={options.tabBarButtonTestID}
+              onPress={onPress}
+              onLongPress={onLongPress}
+              style={({ pressed }) => [
                 styles.iconBubble,
                 isCenter && styles.iconBubbleCenter,
                 !isCenter && isFocused && styles.iconBubbleActive,
                 isCenterActive && isCenter && styles.iconBubbleCenterActive,
+                pressed && styles.iconBubblePressed,
               ]}
             >
               {Icon ? <Icon size={22} color={iconColor} /> : null}
@@ -107,9 +105,8 @@ export function MyTabBar({ state, descriptors, navigation }: BottomTabBarProps) 
             ) : (
               labelNode
             )}
-            </View>
-            
-          </PlatformPressable>
+            </Pressable>
+          </View>
         );
       })}
       <Modal
@@ -145,6 +142,7 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 6 },
     elevation: 10,
+    overflow: "visible",
   },
   tabItem: {
     flex: 1,
@@ -159,32 +157,29 @@ const styles = StyleSheet.create({
   iconBubble: {
     width: 65,
     height: 55,
-    
     borderRadius: 30,
+    overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#fff",
+    backgroundColor: "transparent",
+  },
+  iconBubblePressed: {
+    opacity: 0.85,
   },
   iconBubbleActive: {
-    backgroundColor: "#dbd2d0ff",
-    shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.15,
-    shadowRadius: 18,
+    backgroundColor: "#1F1F1F",
+    borderRadius: 30,
   },
   iconBubbleCenter: {
     width: 64,
     height: 64,
     borderRadius: 32,
     backgroundColor: "#efdcc6ff",
-
+    overflow: "hidden",
   },
   iconBubbleCenterActive: {
-    backgroundColor: "#DCA15F",
-    shadowColor: "#000000",
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
+    backgroundColor: "#000000ff",
+    borderRadius: 32,
   },
   label: {
     marginTop: 4,
