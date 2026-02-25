@@ -12,7 +12,8 @@ import { Diamond,
          Calendar,
          DollarSign,
          Languages,
-         ChevronRight
+         ChevronRight,
+         ShoppingBasket
 
 
         } from 'lucide-react-native';
@@ -273,7 +274,9 @@ export default function Settings() {
           <ChevronRight size={18} style={styles.optionChevron} />
         </Pressable>
           {/* Budget Manager */}
-        <Pressable style={styles.optionCard} onPress={() => openSheet("Budget Manager")}>
+        <Pressable style={styles.optionCard} onPress={() => pushModal({
+            pathname: "/(modals)/(settings)/budget",
+          })}>
           <CreditCard style={styles.optionIcon} color="#FE5A59" strokeWidth={3}/>
           <Text style={styles.optionText}>Budget Manager</Text>
           <ChevronRight size={18} style={styles.optionChevron} />
@@ -292,6 +295,14 @@ export default function Settings() {
           })}>
           <Repeat style = {styles.optionIcon} color="#00DDB7" strokeWidth={3}/>
           <Text style={styles.optionText}>Recurring Payments</Text>
+          <ChevronRight size={18} style={styles.optionChevron} />
+        </Pressable>
+           {/* Shopping List */}
+           <Pressable style={styles.optionCard} onPress={() => pushModal({
+            pathname: "/(modals)/(settings)/shoppinglist",
+          })}>
+          <ShoppingBasket style = {styles.optionIcon} color="#FF8544" strokeWidth={3}/>
+          <Text style={styles.optionText}>Shopping List</Text>
           <ChevronRight size={18} style={styles.optionChevron} />
         </Pressable>
           {/* Start Date */}

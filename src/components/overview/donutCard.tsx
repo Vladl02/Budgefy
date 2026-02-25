@@ -4,7 +4,8 @@ import Svg, { G, Path } from "react-native-svg";
 import * as d3 from "d3-shape";
 import { Minimize2, Maximize2, Pencil } from "lucide-react-native";
 import { CATEGORY_STYLES, IconKey } from "@/src/components/overview/category";
-// we enable LayoutAnimation on Android
+
+// Enable LayoutAnimation on Android
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
@@ -14,19 +15,19 @@ export type SummaryItem = {
   title: string;
   spent?: number;
   budget: number;
-  icon: IconKey; // ✅ use the key, not Icon+color
+  icon: IconKey; 
+  color?: string; // 1. Added optional color prop
 };
 
 type Props = {
-  label?: string;          // "Monthly"
+  label?: string;
   items: SummaryItem[];
-  daysInPeriod?: number;   // 31 default
+  daysInPeriod?: number;
   onLeftPress?: () => void;
   onRightPress?: () => void;
 };
 
 export default function MonthlySummaryCard({
-
   label = "Monthly",
   items,
   daysInPeriod = 31,
@@ -36,21 +37,24 @@ export default function MonthlySummaryCard({
   const total = useMemo(() => items.reduce((s, i) => s + i.budget, 0), [items]);
   const perDay = useMemo(() => (daysInPeriod > 0 ? total / daysInPeriod : 0), [total, daysInPeriod]);
 
-const data = useMemo(
-  () =>
-    items.map((i) => ({
-      value: i.budget,
-      color: CATEGORY_STYLES[i.icon].color,
-    })),
-  [items]
-);
+  // 2. Updated Data Memo to prefer item.color
+  const data = useMemo(
+    () =>
+      items.map((i) => {
+        // Fallback to dictionary style if item.color or item.icon is missing
+        const style = CATEGORY_STYLES[i.icon] || CATEGORY_STYLES.shopping;
+        return {
+          value: i.budget,
+          color: i.color || style.color, // Prefer the custom color
+        };
+      }),
+    [items]
+  );
 
   const [collapsed, setCollapsed] = useState(false);
-
-  // One Animated.Value per row (0 = hidden, 1 = shown)
   const rowAnims = useRef(items.map(() => new Animated.Value(1))).current;
 
-  // If items length changes, ensure we have enough anim values
+  // Sync animations if items change
   useEffect(() => {
     if (rowAnims.length < items.length) {
       for (let i = rowAnims.length; i < items.length; i++) {
@@ -59,8 +63,7 @@ const data = useMemo(
     }
   }, [items.length, collapsed]);
 
-  //animate the minimize icon rotation
-    const animateRows = (toValue: 0 | 1, cb?: () => void) => {
+  const animateRows = (toValue: 0 | 1, cb?: () => void) => {
     const anims = rowAnims
       .slice(0, items.length)
       .map((a) =>
@@ -70,47 +73,39 @@ const data = useMemo(
           useNativeDriver: true,
         })
       );
-
     Animated.stagger(35, toValue === 1 ? anims : anims.reverse()).start(() => cb?.());
   };
 
   const handleLeftPress = () => {
     if (!collapsed) {
-      // 1) animate rows out
       animateRows(0, () => {
-        // 2) animate the card height change when rows are removed
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
         setCollapsed(true);
       });
     } else {
-      // 1) animate the card height change when rows are added back
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setCollapsed(false);
-
-      // 2) then animate rows in
       requestAnimationFrame(() => animateRows(1));
     }
   };
 
   return (
     <View style={styles.card}>
-      {/* Top corner buttons */}
-    <Pressable style={styles.cornerBtn} onPress={handleLeftPress} hitSlop={10}>
-      {collapsed ? (
-        <Maximize2 size={14} color="#5E6C37" strokeWidth={2.5} />
-      ) : (
-        <Minimize2 size={14} color="#5E6C37" strokeWidth={2.5} />
-      )}
-    </Pressable>
+      <Pressable style={styles.cornerBtn} onPress={handleLeftPress} hitSlop={10}>
+        {collapsed ? (
+          <Maximize2 size={14} color="#5E6C37" strokeWidth={2.5} />
+        ) : (
+          <Minimize2 size={14} color="#5E6C37" strokeWidth={2.5} />
+        )}
+      </Pressable>
 
       <Pressable style={[styles.cornerBtn, { right: 16, left: undefined }]} onPress={onRightPress} hitSlop={10}>
         <Pencil size={14} color="#5E6C37" strokeWidth={2.5} />
       </Pressable>
 
-      {/* Header area: donut + totals */}
+      {/* Header area */}
       <View style={styles.headerRow}>
         <Donut size={100} strokeWidth={12} data={data} />
-
         <View style={styles.totals}>
           <Text style={styles.label}>{label}</Text>
           <Text style={styles.total}>${formatMoney(total)}</Text>
@@ -123,10 +118,13 @@ const data = useMemo(
         <View>
           {items.map((item, idx) => {
             const pct = total > 0 ? (item.budget / total) * 100 : 0;
-            const Icon = CATEGORY_STYLES[item.icon].Icon;
+            
+            // 3. Updated render logic to prefer item.color
+            const style = CATEGORY_STYLES[item.icon] || CATEGORY_STYLES.shopping;
+            const Icon = style.Icon;
+            const activeColor = item.color || style.color; // Prefer custom color
 
             const anim = rowAnims[idx];
-            const opacity = anim;
             const translateY = anim.interpolate({
               inputRange: [0, 1],
               outputRange: [-8, 0],
@@ -135,15 +133,15 @@ const data = useMemo(
             return (
               <Animated.View
                 key={item.id}
-                style={{ opacity, transform: [{ translateY }] }}
+                style={{ opacity: anim, transform: [{ translateY }] }}
               >
                 <View style={styles.row}>
                   <View style={styles.rowLeft}>
-                    <Icon size={24} color={CATEGORY_STYLES[item.icon].color} strokeWidth={2.5} />
+                    {/* Use activeColor here */}
+                    <Icon size={24} color={activeColor} strokeWidth={2.5} />
                     <Text style={styles.rowTitle}>{item.title}</Text>
                     <Text style={styles.rowPct}>{pct.toFixed(2)}%</Text>
                   </View>
-
                   <Text style={styles.rowAmount}>${formatMoney(item.budget)}</Text>
                 </View>
               </Animated.View>
@@ -198,7 +196,6 @@ function Donut({
 /* ---------------- Utils ---------------- */
 
 function formatMoney(n: number) {
-  // simple formatting; customize to RON later if you want
   return n.toFixed(2).replace(/\.00$/, "");
 }
 
@@ -217,7 +214,6 @@ const styles = StyleSheet.create({
     shadowRadius: 22,
     elevation: 8,
   },
-
   cornerBtn: {
     position: "absolute",
     top: 16,
@@ -230,67 +226,56 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     zIndex: 10,
   },
-
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
     paddingTop: 30,
     paddingBottom: 12,
   },
-
   totals: {
     marginLeft: 16,
     flex: 1,
     alignItems: "center",
   },
-
   label: {
     color: "rgba(0,0,0,0.45)",
     fontSize: 18,
     fontWeight: "700",
     marginBottom: 6,
   },
-
   total: {
     fontSize: 32,
     fontWeight: "900",
     color: "#000",
-
   },
-
   perDay: {
     color: "rgba(0,0,0,0.35)",
     fontSize: 18,
     fontWeight: "600",
   },
-
   row: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingVertical: 10,
   },
-
   rowLeft: {
     flexDirection: "row",
     alignItems: "center",
     flex: 1,
   },
-
   rowTitle: {
     fontSize: 18,
     fontWeight: "500",
     color: "#000",
     marginLeft: 6,
   },
-
   rowPct: {
     fontSize: 15,
     fontWeight: "600",
     color: "rgba(0,0,0,0.35)",
     marginLeft: 6,
   },
-
   rowAmount: {
     fontSize: 16,
     fontWeight: "600",

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { 
   Pressable, 
   ScrollView, 
@@ -8,11 +8,51 @@ import {
   TextInput, 
   KeyboardAvoidingView, 
   Platform,
-  Keyboard
+  Keyboard,
+  FlatList,
+  ActivityIndicator,
+  Alert
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SlidingSheet } from "@/src/components/SlidingSheet";
-import { Plus, CreditCard, ChevronLeft, Bell, Trash2 } from 'lucide-react-native';
+import { Plus, CreditCard, ChevronLeft, Bell, Trash2, Search, Check, ChevronRight, BellRing } from 'lucide-react-native';
+
+// ---------------------------------------------------------------------------
+// 🚨 CRASH FIX: MOCKING NOTIFICATIONS 🚨
+// The real library is commented out because your native build is missing the code.
+// To enable real notifications later, uncomment the import and delete the Mock object.
+// ---------------------------------------------------------------------------
+
+// import * as Notifications from 'expo-notifications'; // <--- UNCOMMENT THIS LATER
+
+// --- MOCK OBJECT (Keeps app from crashing) ---
+const Notifications = {
+  setNotificationHandler: (_: any) => { console.log("Mock: Handler set"); },
+  getPermissionsAsync: async () => ({ status: 'granted' }), 
+  requestPermissionsAsync: async () => ({ status: 'granted' }),
+  scheduleNotificationAsync: async (content: any) => {
+    console.log("Mock: Notification scheduled!", content);
+    return "mock-id-123";
+  },
+  cancelScheduledNotificationAsync: async (id: string) => {
+    console.log("Mock: Notification cancelled", id);
+  },
+  SchedulableTriggerInputTypes: {
+    CALENDAR: 'calendar'
+  }
+};
+// ---------------------------------------------------------------------------
+
+// Configure Handler (Safe now because it uses the mock)
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
+
+// --- DATA DEFINITIONS ---
 
 interface Payment {
   id: string;
@@ -20,14 +60,39 @@ interface Payment {
   amount: number;
   day: string;
   color: string; 
+  currency: string;
+  notificationId?: string;
+  reminderOffset?: number;
 }
 
-// 2. Align Initial Data with the Interface (use color strings, not JSX)
+interface CurrencyOption {
+  code: string;
+  symbol: string;
+  name: string;
+}
+
+const FALLBACK_RATES: Record<string, number> = {
+  'RON': 1.00, 'EUR': 0.20, 'USD': 0.22, 'GBP': 0.17, 
+  'CHF': 0.19, 'CAD': 0.30, 'AUD': 0.33, 'JPY': 32.5, 'CNY': 1.58,
+};
+
+const CURRENCY_DATA: CurrencyOption[] = [
+  { code: 'RON', symbol: 'lei', name: 'Romanian Leu' },
+  { code: 'EUR', symbol: '€', name: 'Euro' },
+  { code: 'USD', symbol: '$', name: 'US Dollar' },
+  { code: 'GBP', symbol: '£', name: 'British Pound' },
+];
+
+const REMINDER_OPTIONS = [
+  { label: 'None', value: -1 },
+  { label: 'On day', value: 0 },
+  { label: '1 day before', value: 1 },
+  { label: '3 days before', value: 3 },
+  { label: '1 week before', value: 7 },
+];
+
 const INITIAL_PAYMENTS: Payment[] = [
-  { id: '1', name: 'Netflix', amount: 15.99, day: '12', color: "#E50914" },
-  { id: '2', name: 'Spotify', amount: 9.99, day: '01', color: "#1DB954" },
-  { id: '3', name: 'Cursor', amount: 19.99, day: '01', color: "#FFC83C" },
-  { id: '4', name: 'Gym Membership', amount: 29.99, day: '20', color: "#57A7FD" },
+  { id: '1', name: 'Netflix', amount: 15.99, day: '12', color: "#E50914", currency: 'USD' },
 ];
 
 const ICON_PALETTE = [
@@ -37,80 +102,231 @@ const ICON_PALETTE = [
 export default function RecurringExpense() {
   const router = useRouter();
   
+  // UI States
   const [isAdding, setIsAdding] = useState(false);
-  // 3. Explicitly type the state
+  const [isSelectingCurrency, setIsSelectingCurrency] = useState(false); 
+  const [searchText, setSearchText] = useState("");
+  const [isLoadingRates, setIsLoadingRates] = useState(true);
+
+  // Data States
   const [payments, setPayments] = useState<Payment[]>(INITIAL_PAYMENTS);
-  
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
   const [day, setDay] = useState("");
+  const [currency, setCurrency] = useState<CurrencyOption>(CURRENCY_DATA[0]);
+  
+  const [reminderOffset, setReminderOffset] = useState(0); 
+  const [exchangeRates, setExchangeRates] = useState<Record<string, number>>(FALLBACK_RATES);
 
-  const handleDismiss = () => {
-    router.back();
+  // --- EFFECTS ---
+
+  useEffect(() => {
+    async function getPermissions() {
+      try {
+        const { status } = await Notifications.getPermissionsAsync();
+        if (status !== 'granted') {
+          await Notifications.requestPermissionsAsync();
+        }
+      } catch (e) {
+        console.warn("Permission check skipped (Mock mode)");
+      }
+    }
+    getPermissions();
+
+    // Fetch Rates
+    const fetchRates = async () => {
+      try {
+        setIsLoadingRates(true);
+        const response = await fetch('https://api.exchangerate-api.com/v4/latest/RON');
+        const data = await response.json();
+        if (data && data.rates) setExchangeRates(data.rates);
+      } catch (error) {
+        console.log("Using fallback rates");
+      } finally {
+        setIsLoadingRates(false);
+      }
+    };
+    fetchRates();
+  }, []);
+
+  // --- LOGIC ---
+
+  const handleDismiss = () => router.back();
+
+  const scheduleReminder = async (title: string, amountStr: string, billDay: string, offset: number) => {
+    if (offset === -1) return undefined;
+
+    try {
+      let triggerDay = parseInt(billDay) - offset;
+      if (triggerDay < 1) triggerDay = 28; 
+
+      const id = await Notifications.scheduleNotificationAsync({
+        content: {
+          title: `Upcoming Bill: ${title}`,
+          body: `Your payment of ${amountStr} is due ${offset === 0 ? 'today' : `in ${offset} days`}.`,
+          sound: true,
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.CALENDAR,
+          day: triggerDay,
+          hour: 9, 
+          minute: 0,
+          repeats: true,
+        },
+      });
+      return id;
+
+    } catch (e) {
+      console.log("Scheduling skipped:", e);
+      return undefined;
+    }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!name || !amount || !day) return;
 
-    const colorIndex = payments.length % ICON_PALETTE.length;
-    const chosenColor = ICON_PALETTE[colorIndex];
+    const symbol = currency.symbol;
+    const amountStr = `${amount}${symbol}`;
+    
+    const notificationId = await scheduleReminder(name, amountStr, day, reminderOffset);
 
     const newPayment: Payment = {
       id: Math.random().toString(),
       name,
       amount: parseFloat(amount),
       day: day.padStart(2, '0'),
-      color: chosenColor, 
+      color: ICON_PALETTE[payments.length % ICON_PALETTE.length],
+      currency: currency.code,
+      notificationId,
+      reminderOffset,
     };
     
     setPayments([...payments, newPayment]);
-    
-    setIsAdding(false);
-    setName("");
-    setAmount("");
-    setDay("");
-    Keyboard.dismiss();
+    resetForm();
   };
 
-  const deletePayment = (id: string) => {
+  const deletePayment = async (id: string) => {
+    const payment = payments.find(p => p.id === id);
+    if (payment?.notificationId) {
+      try {
+        await Notifications.cancelScheduledNotificationAsync(payment.notificationId);
+      } catch (e) {
+        console.warn("Cancel failed:", e);
+      }
+    }
     setPayments(payments.filter(p => p.id !== id));
   };
 
-  const totalMonthly = payments.reduce((acc, curr) => acc + curr.amount, 0);
+  const resetForm = () => {
+    setIsAdding(false);
+    setIsSelectingCurrency(false);
+    setName("");
+    setAmount("");
+    setDay("");
+    setCurrency(CURRENCY_DATA[0]);
+    setReminderOffset(0);
+    Keyboard.dismiss();
+  };
+
+  const getSymbol = (code: string) => CURRENCY_DATA.find(c => c.code === code)?.symbol || code;
+
+  const filteredCurrencies = useMemo(() => {
+    if (!searchText) return CURRENCY_DATA;
+    return CURRENCY_DATA.filter(c => 
+      c.name.toLowerCase().includes(searchText.toLowerCase()) || 
+      c.code.toLowerCase().includes(searchText.toLowerCase())
+    );
+  }, [searchText]);
+
+  const totalMonthlyRON = useMemo(() => {
+    return payments.reduce((acc, curr) => {
+      const rate = exchangeRates[curr.currency] || 1; 
+      const safeRate = rate === 0 ? 1 : rate;
+      return acc + (curr.amount / safeRate);
+    }, 0);
+  }, [payments, exchangeRates]);
+
+  // --- RENDER HELPERS ---
+
+  const renderCurrencyPicker = () => (
+    <View style={styles.pickerContainer}>
+      <View style={styles.searchBar}>
+        <Search size={20} color="#999" />
+        <TextInput 
+          style={styles.searchInput}
+          placeholder="Search currency"
+          placeholderTextColor="#999"
+          value={searchText}
+          onChangeText={setSearchText}
+          autoFocus
+        />
+      </View>
+      <FlatList 
+        data={filteredCurrencies}
+        keyExtractor={item => item.code}
+        keyboardShouldPersistTaps="handled"
+        renderItem={({ item }) => (
+          <Pressable 
+            style={styles.currencyRow} 
+            onPress={() => {
+              setCurrency(item);
+              setIsSelectingCurrency(false);
+              setSearchText("");
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <View style={styles.currencyBadge}><Text style={styles.currencyBadgeText}>{item.symbol}</Text></View>
+              <View>
+                <Text style={styles.currencyCode}>{item.code}</Text>
+                <Text style={styles.currencyName}>{item.name}</Text>
+              </View>
+            </View>
+            {currency.code === item.code && <Check size={20} color="#1F1F1F" />}
+          </Pressable>
+        )}
+      />
+    </View>
+  );
 
   return (
     <View style={styles.screenWrapper}>
       <SlidingSheet onDismiss={handleDismiss} heightPercent={0.85} backdropOpacity={0.4}>
         {(closeSheet) => (
-          <KeyboardAvoidingView 
-            behavior={Platform.OS === "ios" ? "padding" : "height"} 
-            style={{ flex: 1 }}
-          >
+          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
             <View style={styles.container}>
               
+              {/* Header */}
               <View style={styles.header}>
                 <View style={styles.headerSide}>
-                  {isAdding && (
-                    <Pressable onPress={() => setIsAdding(false)} hitSlop={10}>
+                  {(isAdding || isSelectingCurrency) && (
+                    <Pressable onPress={() => isSelectingCurrency ? setIsSelectingCurrency(false) : setIsAdding(false)} hitSlop={10}>
                       <ChevronLeft size={24} color="#1F1F1F" />
                     </Pressable>
                   )}
                 </View>
                 <Text style={styles.mainTitle}>
-                  {isAdding ? "Add Payment" : "Recurring"}
+                  {isSelectingCurrency ? "Select Currency" : isAdding ? "Add Payment" : "Recurring"}
                 </Text>
                 <View style={styles.headerSide} />
               </View>
 
-              {!isAdding ? (
+              {/* View Switcher */}
+              {isSelectingCurrency ? renderCurrencyPicker() : !isAdding ? (
+                
+                // --- LIST VIEW ---
                 <View style={{ flex: 1 }}>
                   <Text style={styles.subtitle}>Manage your automated monthly bills</Text>
-                  
                   <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
                     <View style={styles.summaryCard}>
                       <View>
-                        <Text style={styles.summaryLabel}>Total Monthly Commitment</Text>
-                        <Text style={styles.summaryAmount}>${totalMonthly.toFixed(2)}</Text>
+                        <View style={{flexDirection: 'row', alignItems: 'center', gap: 6}}>
+                           <Text style={styles.summaryLabel}>Total Monthly (Est.)</Text>
+                           {isLoadingRates && <ActivityIndicator size="small" color="#999" />}
+                        </View>
+                        <View style={{flexDirection: 'row', alignItems: 'baseline', gap: 4}}>
+                          <Text style={styles.summaryAmount}>{totalMonthlyRON.toFixed(2)}</Text>
+                          <Text style={styles.summaryCurrency}>RON</Text>
+                        </View>
                       </View>
                       <Bell size={22} color="#1F1F1F" strokeWidth={2} />
                     </View>
@@ -119,16 +335,22 @@ export default function RecurringExpense() {
                     
                     {payments.map((item) => (
                       <View key={item.id} style={styles.paymentItem}>
-                        {/* 4. Render the Icon using the stored color string */}
                         <View style={[styles.iconContainer, { backgroundColor: item.color + '15' }]}>
                           <CreditCard size={18} color={item.color} />
                         </View>
                         <View style={styles.paymentInfo}>
                           <Text style={styles.paymentName}>{item.name}</Text>
-                          <Text style={styles.paymentDate}>Due every {item.day}th</Text>
+                          <View style={{flexDirection: 'row', alignItems: 'center', gap: 4}}>
+                            <Text style={styles.paymentDate}>Day {item.day}</Text>
+                            {/* Show icon only if notification was successfully set */}
+                            {item.notificationId && <BellRing size={12} color="#999" />}
+                          </View>
                         </View>
                         <View style={{ alignItems: 'flex-end' }}>
-                          <Text style={styles.paymentAmount}>-${item.amount.toFixed(2)}</Text>
+                          <Text style={styles.paymentAmount}>-{getSymbol(item.currency)}{item.amount.toFixed(2)}</Text>
+                          {item.currency !== 'RON' && (
+                             <Text style={styles.convertedText}>≈ {((item.amount / (exchangeRates[item.currency] || 1))).toFixed(0)} lei</Text>
+                          )}
                           <Pressable onPress={() => deletePayment(item.id)} style={{marginTop: 6}}>
                              <Trash2 size={16} color="#FFBABA" />
                           </Pressable>
@@ -143,6 +365,8 @@ export default function RecurringExpense() {
                   </ScrollView>
                 </View>
               ) : (
+
+                // --- ADD FORM ---
                 <View style={styles.formContainer}>
                   <Text style={styles.formSubtitle}>Enter details for your new recurring expense</Text>
                   
@@ -150,7 +374,7 @@ export default function RecurringExpense() {
                     <Text style={styles.label}>Service / Bill Name</Text>
                     <TextInput 
                       style={styles.input}
-                      placeholder="e.g. Rent, Gym, Disney+"
+                      placeholder="e.g. Rent, Gym"
                       placeholderTextColor="#AAA"
                       value={name}
                       onChangeText={setName}
@@ -184,13 +408,44 @@ export default function RecurringExpense() {
                     </View>
                   </View>
 
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>Currency</Text>
+                    <Pressable style={styles.currencyTrigger} onPress={() => setIsSelectingCurrency(true)}>
+                      <View style={{flexDirection: 'row', alignItems: 'center', gap: 10}}>
+                        <View style={styles.miniBadge}><Text style={styles.miniBadgeText}>{currency.symbol}</Text></View>
+                        <Text style={styles.currencyTriggerText}>{currency.code} - {currency.name}</Text>
+                      </View>
+                      <ChevronRight size={20} color="#999" />
+                    </Pressable>
+                  </View>
+
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>Notification Reminder</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap: 8}}>
+                      {REMINDER_OPTIONS.map((opt) => {
+                        const isSelected = reminderOffset === opt.value;
+                        return (
+                          <Pressable 
+                            key={opt.label}
+                            style={[styles.reminderOption, isSelected && styles.reminderOptionActive]}
+                            onPress={() => setReminderOffset(opt.value)}
+                          >
+                            <Text style={[styles.reminderText, isSelected && styles.reminderTextActive]}>
+                              {opt.label}
+                            </Text>
+                          </Pressable>
+                        )
+                      })}
+                    </ScrollView>
+                  </View>
+
                   <View style={{ flex: 1 }} /> 
 
                   <Pressable 
                     style={[styles.saveButton, (!name || !amount || !day) && styles.saveButtonDisabled]} 
                     onPress={handleSave}
                   >
-                    <Text style={styles.saveButtonText}>Confirm Payment</Text>
+                    <Text style={styles.saveButtonText}>Confirm Recurring Expense</Text>
                   </Pressable>
                 </View>
               )}
@@ -203,163 +458,50 @@ export default function RecurringExpense() {
 }
 
 const styles = StyleSheet.create({
-    screenWrapper: {
-    flex: 1,
-    backgroundColor: "transparent",
-  },
-  container: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 20,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  headerSide: {
-    width: 40,
-  },
-  mainTitle: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: "#1F1F1F",
-  },
-  subtitle: {
-    fontSize: 13,
-    color: "#666",
-    marginBottom: 20,
-    textAlign: "center",
-  },
-  scrollContent: {
-    paddingBottom: 20,
-  },
-  summaryCard: {
-    backgroundColor: '#F7F7F7',
-    borderRadius: 16,
-    padding: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: '#EEEEEE',
-  },
-  summaryLabel: {
-    fontSize: 12,
-    color: '#666',
-    fontWeight: '700',
-    textTransform: 'uppercase',
-  },
-  summaryAmount: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: '#1F1F1F',
-    marginTop: 4,
-  },
-  sectionHeader: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#1F1F1F',
-    marginBottom: 12,
-  },
-  paymentItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'white',
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F2F2F2',
-  },
-  iconContainer: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 14,
-  },
-  paymentInfo: {
-    flex: 1,
-  },
-  paymentName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1F1F1F',
-  },
-  paymentDate: {
-    fontSize: 13,
-    color: '#999',
-    marginTop: 2,
-  },
-  paymentAmount: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#FE5A59',
-  },
-  addButton: {
-    flexDirection: 'row',
-    backgroundColor: '#1C1C1E',
-    borderRadius: 16,
-    paddingVertical: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 24,
-    gap: 8,
-  },
-  addButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  formContainer: {
-    flex: 1,
-    marginTop: 10,
-  },
-  formSubtitle: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 24,
-    textAlign: 'center',
-  },
-  inputGroup: {
-    marginBottom: 20,
-  },
-  label: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#1F1F1F',
-    marginBottom: 8,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  input: {
-    backgroundColor: '#F5F5F5',
-    borderRadius: 14,
-    padding: 16,
-    fontSize: 16,
-    color: '#1F1F1F',
-    borderWidth: 1,
-    borderColor: '#EEE',
-  },
-  rowInputs: {
-    flexDirection: 'row',
-  },
-  saveButton: {
-    backgroundColor: '#1F1F1F',
-    borderRadius: 16,
-    paddingVertical: 18,
-    alignItems: 'center',
-  },
-  saveButtonDisabled: {
-    opacity: 0.3,
-  },
-  saveButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-
+  screenWrapper: { flex: 1, backgroundColor: "transparent" },
+  container: { flex: 1, paddingHorizontal: 20, paddingTop: 16, paddingBottom: Platform.OS === 'ios' ? 40 : 20 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, minHeight: 40 },
+  headerSide: { width: 40 },
+  mainTitle: { fontSize: 20, fontWeight: "800", color: "#1F1F1F" },
+  subtitle: { fontSize: 13, color: "#666", marginBottom: 20, textAlign: "center" },
+  scrollContent: { paddingBottom: 20 },
+  summaryCard: { backgroundColor: '#F7F7F7', borderRadius: 16, padding: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, borderWidth: 1, borderColor: '#EEEEEE' },
+  summaryLabel: { fontSize: 12, color: '#666', fontWeight: '700', textTransform: 'uppercase' },
+  summaryAmount: { fontSize: 26, fontWeight: '800', color: '#1F1F1F', marginTop: 4 },
+  summaryCurrency: { fontSize: 16, fontWeight: '600', color: '#999', marginBottom: 2 },
+  sectionHeader: { fontSize: 15, fontWeight: '700', color: '#1F1F1F', marginBottom: 12 },
+  paymentItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F2F2F2' },
+  iconContainer: { width: 42, height: 42, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 14 },
+  paymentInfo: { flex: 1 },
+  paymentName: { fontSize: 16, fontWeight: '600', color: '#1F1F1F' },
+  paymentDate: { fontSize: 13, color: '#999', marginTop: 2 },
+  paymentAmount: { fontSize: 16, fontWeight: '700', color: '#FE5A59' },
+  convertedText: { fontSize: 11, color: '#BBB', textAlign: 'right', marginTop: 2 },
+  addButton: { flexDirection: 'row', backgroundColor: '#1C1C1E', borderRadius: 16, paddingVertical: 16, justifyContent: 'center', alignItems: 'center', marginTop: 24, gap: 8 },
+  addButtonText: { color: 'white', fontSize: 16, fontWeight: '700' },
+  formContainer: { flex: 1, marginTop: 10 },
+  formSubtitle: { fontSize: 14, color: '#666', marginBottom: 24, textAlign: 'center' },
+  inputGroup: { marginBottom: 20 },
+  label: { fontSize: 13, fontWeight: '700', color: '#1F1F1F', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
+  input: { backgroundColor: '#F5F5F5', borderRadius: 14, padding: 16, fontSize: 16, color: '#1F1F1F', borderWidth: 1, borderColor: '#EEE' },
+  rowInputs: { flexDirection: 'row' },
+  saveButton: { backgroundColor: '#1F1F1F', borderRadius: 16, paddingVertical: 18, alignItems: 'center' },
+  saveButtonDisabled: { opacity: 0.3 },
+  saveButtonText: { color: 'white', fontSize: 16, fontWeight: '700' },
+  currencyTrigger: { backgroundColor: '#F5F5F5', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#EEE', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  currencyTriggerText: { fontSize: 16, color: '#1F1F1F', fontWeight: '500' },
+  miniBadge: { backgroundColor: '#E0E0E0', width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  miniBadgeText: { fontSize: 12, fontWeight: '700', color: '#333' },
+  pickerContainer: { flex: 1, marginTop: 10 },
+  searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 12, marginBottom: 20, gap: 10 },
+  searchInput: { flex: 1, fontSize: 16, color: '#1F1F1F' },
+  currencyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#F2F2F2' },
+  currencyBadge: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center' },
+  currencyBadgeText: { fontSize: 16, fontWeight: '600', color: '#333' },
+  currencyCode: { fontSize: 16, fontWeight: '700', color: '#1F1F1F' },
+  currencyName: { fontSize: 13, color: '#666' },
+  reminderOption: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, backgroundColor: '#F5F5F5', marginRight: 4, borderWidth: 1, borderColor: 'transparent' },
+  reminderOptionActive: { backgroundColor: '#1F1F1F', borderColor: '#1F1F1F' },
+  reminderText: { fontSize: 13, fontWeight: '600', color: '#666' },
+  reminderTextActive: { color: 'white' },
 });

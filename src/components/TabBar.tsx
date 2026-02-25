@@ -36,8 +36,8 @@ export function MyTabBar({ state, descriptors, navigation }: BottomTabBarProps) 
         const isCenter = route.name === "scan";
         const isCenterActive = isCenter ? true : isFocused;
         const Icon = ICONS_BY_ROUTE[route.name as keyof typeof ICONS_BY_ROUTE];
-        const iconColor = isCenter || isFocused ? "#3B3B3B" : "#8A8A8A";
-        const labelColor = isCenter || isFocused ? "#2E2E2E" : "#7A7A7A";
+        const iconColor = isCenter || isFocused ? "#ffffffff" : "#000000ff";
+        const labelColor = isCenter || isFocused ? "#ffffffff" : "#000000ff";
         
         const labelNode =
           typeof label === "function"
@@ -159,14 +159,13 @@ const styles = StyleSheet.create({
   iconBubble: {
     width: 65,
     height: 55,
-    
     borderRadius: 30,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#fff",
+    backgroundColor: "transparent",
   },
   iconBubbleActive: {
-    backgroundColor: "#dbd2d0ff",
+    backgroundColor: "#1F1F1F",
     shadowColor: "#000000",
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.15,
@@ -180,7 +179,7 @@ const styles = StyleSheet.create({
 
   },
   iconBubbleCenterActive: {
-    backgroundColor: "#DCA15F",
+    backgroundColor: "#000000ff",
     shadowColor: "#000000",
     shadowOpacity: 0.2,
     shadowRadius: 10,

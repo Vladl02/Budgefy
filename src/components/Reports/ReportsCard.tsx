@@ -1,29 +1,61 @@
 import { View, Text, StyleSheet } from "react-native";
-import { Check } from "lucide-react-native";
+import { ShoppingBag } from "lucide-react-native";
 
 type ReportCardProps = {
   title: string;
   date: string;
   amount: string;
+  status: "processed" | "needs action" | "failed";
 };
 
-export default function ReportCard({ title, date, amount }: ReportCardProps) {
+// Configuration for status colors and labels
+const STATUS_CONFIG = {
+  processed: {
+    bg: "#E6F9EA",      // Light Green
+    color: "#34C759",   // Green
+    label: "Processed"
+  },
+  "needs action": {
+    bg: "#FFF4E5",      // Light Orange
+    color: "#FF9500",   // Orange
+    label: "Needs Action"
+  },
+  failed: {
+    bg: "#FFEBEE",      // Light Red
+    color: "#FF3B30",   // Red
+    label: "Failed"
+  }
+};
+
+export default function ReportCard({ title, date, amount, status }: ReportCardProps) {
+  // Get style config based on status prop, fallback to processed if undefined
+  const config = STATUS_CONFIG[status] || STATUS_CONFIG.processed;
+
   return (
     <View style={styles.card}>
-      <View style={styles.photo} />
+      {/* Icon / Image Placeholder */}
+      <View style={styles.iconContainer}>
+        <ShoppingBag size={24} color="#7E57FF" />
+      </View>
 
+      {/* Text Info */}
       <View style={styles.textColumn}>
-        <Text style={styles.metaText}>{date}</Text>
         <Text style={styles.titleText}>{title}</Text>
+        <Text style={styles.metaText}>{date}</Text>
       </View>
 
       <View style={{ flex: 1 }} />
 
+      {/* Right Side: Amount & Status */}
       <View style={styles.rightColumn}>
-        <View style={styles.statusBox}>
-          <Check size={12} color="#1eff00ff" strokeWidth={4} />
-        </View>
         <Text style={styles.amount}>{amount}</Text>
+        
+        <View style={[styles.statusRow, { backgroundColor: config.bg }]}>
+            <View style={[styles.statusDot, { backgroundColor: config.color }]} />
+            <Text style={[styles.statusText, { color: config.color }]}>
+              {config.label}
+            </Text>
+        </View>
       </View>
     </View>
   );
@@ -32,65 +64,70 @@ export default function ReportCard({ title, date, amount }: ReportCardProps) {
 const styles = StyleSheet.create({
   card: {
     width: "90%",
-    height: 80,
-    borderRadius: 15,
-    backgroundColor: "#5E6C37",
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    backgroundColor: "#FFFFFF",
     alignSelf: "center",
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 12,
+    // Modern Soft Shadow
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.22,
-    shadowRadius: 5,
-    elevation: 10,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: "#F2F2F7",
   },
-  photo: {
-    width: 70,
-    height: 70,
-    backgroundColor: "white",
-    borderRadius: 10,
-    marginLeft: 5,
+  iconContainer: {
+    width: 50,
+    height: 50,
+    backgroundColor: "#F5F3FF", // Light Purple background
+    borderRadius: 14,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 14,
   },
   textColumn: {
-    marginLeft: 10,
     justifyContent: "center",
-  },
-  metaText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#EAE8C7",
-    marginBottom: 2,
+    gap: 4,
   },
   titleText: {
-    fontSize: 15,
-    fontWeight: "900",
-    color: "#FEFADF",
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#1A1A1A",
+  },
+  metaText: {
+    fontSize: 13,
+    fontWeight: "500",
+    color: "#8E8E93",
   },
   rightColumn: {
-    justifyContent: "center",
     alignItems: "flex-end",
-    marginRight: 8,
-  },
-  statusBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#fff",
-    borderRadius: 100,
-    paddingHorizontal: 4,
-    height: 20,
-    marginBottom: 25,
-  },
-  status: {
-    color: "white",
-    fontWeight: "900",
-    fontSize: 13,
-    marginLeft: 4,
+    gap: 4,
   },
   amount: {
-    fontSize: 15,
-    fontWeight: "900",
-    color: "#FEFADF",
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#1A1A1A",
   },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 6,
+  },
+  statusText: {
+    fontSize: 11,
+    fontWeight: "600",
+  }
 });

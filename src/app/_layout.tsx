@@ -81,7 +81,23 @@ export default function RootLayout() {
               name="(modals)/(settings)/savingsmanager"
               options={{ 
                 presentation: "transparentModal",
-                title: "Recurring Expense",
+                title: "Savings Manager",
+                animation: "none",
+              }}
+            />
+            <Stack.Screen
+              name="(modals)/(settings)/budget"
+              options={{ 
+                presentation: "transparentModal",
+                title: "Budget",
+                animation: "none",
+              }}
+            />
+            <Stack.Screen
+              name="(modals)/(settings)/shoppinglist"
+              options={{ 
+                presentation: "transparentModal",
+                title: "Notes",
                 animation: "none",
               }}
             />
