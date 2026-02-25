@@ -10,7 +10,6 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView, // Changed to standard React Native component
   Alert,
 } from "react-native";
 import {

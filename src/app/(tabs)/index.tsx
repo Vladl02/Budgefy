@@ -3,79 +3,123 @@ import { ExpenseGrid, type ExpenseItem } from "@/src/components/homepage/Expense
 import { TopBar } from "@/src/components/homepage/TopBar";
 import { SafeArea } from "@/src/components/SafeArea";
 import { useGuardedModalPush } from "@/src/hooks/guardForModals";
-import { Banknote, Bus, Coffee, Droplets, Film, ShoppingCart, Utensils } from "lucide-react-native";
-import { StyleSheet, Text, View } from "react-native";
-import { useFonts } from "expo-font";
 import {
   Inter_400Regular,
   Inter_500Medium,
   Inter_600SemiBold,
   Inter_700Bold,
 } from "@expo-google-fonts/inter";
-const EXPENSES: ExpenseItem[] = [
-  {
-    id: "coffee",
-    name: "Coffee",
-    amount: 12.5,
-    backgroundColor: "#c38fee63",
-    circleColor: "#C48FEE",
-    icon: Coffee,
-  },
-  {
-    id: "transport",
-    name: "Transport",
-    amount: 36,
-    backgroundColor: "#ffc83c66",
-    circleColor: "#FFC83C",
-    icon: Bus,
-  },
-  {
-    id: "groceries",
-    name: "Groceries",
-    amount: 128.2,
-    backgroundColor: "#00ddb86c",
-    circleColor: "#00DDB7",
-    icon: ShoppingCart,
-  },
-  {
-    id: "food",
-    name: "Food",
-    amount: 72.3,
-    backgroundColor: "#ff47537e",
-    circleColor: "#FF4752",
-    icon: Utensils,
-  },
-  {
-    id: "utilities",
-    name: "Utilities",
-    amount: 64,
-    backgroundColor: "#36a8ff6e",
-    circleColor: "#36A8FF",
-    icon: Droplets,
-  },
-  {
-    id: "entertainment",
-    name: "Movies",
-    amount: 22,
-    backgroundColor: "#ff98495d",
-    circleColor: "#FF9949",
-    icon: Film,
-  },
-  {
-    id: "cash",
-    name: "Cash",
-    amount: 90,
-    backgroundColor: "rgba(95, 255, 148, 0.35)",
-    circleColor: "rgba(95, 255, 148, 1)",
-    icon: Banknote,
-  },
-  
-];
+import { useFonts } from "expo-font";
+import type { LucideIcon } from "lucide-react-native";
+import {
+  Banknote,
+  BookOpen,
+  Bus,
+  CircleHelp,
+  Coffee,
+  Droplets,
+  Film,
+  PiggyBank,
+  ShoppingCart,
+  Utensils,
+} from "lucide-react-native";
+import { useCallback, useMemo } from "react";
+import { StyleSheet, Text, View } from "react-native";
+
+import { categoriesForMonth, paymentSumsByCategory } from "@/src/utils/queries";
+import { drizzle, useLiveQuery } from "drizzle-orm/expo-sqlite";
+import { useSQLiteContext } from "expo-sqlite";
+
+const ICONS: Record<string, LucideIcon> = {
+  Banknote,
+  BookOpen,
+  Bus,
+  Coffee,
+  Droplets,
+  Film,
+  PiggyBank,
+  ShoppingCart,
+  Utensils,
+};
+
+const withAlpha = (hex: string, alpha: number): string => {
+  const normalized = hex.replace("#", "").trim();
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) {
+    return hex;
+  }
+
+  const r = Number.parseInt(normalized.slice(0, 2), 16);
+  const g = Number.parseInt(normalized.slice(2, 4), 16);
+  const b = Number.parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
 
 function HomeContent() {
   const drawer = useAppDrawer();
   const { pushModal } = useGuardedModalPush();
 
+  const dbExpo = useSQLiteContext();
+  const db = drizzle(dbExpo);
+  const currentMonth = useMemo(
+    () => new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+    [],
+  );
+
+  const categoriesQuery = useMemo(
+    () => categoriesForMonth(db, currentMonth),
+    [db, currentMonth],
+  );
+  const paymentsQuery = useMemo(
+    () => paymentSumsByCategory(db),
+    [db],
+  );
+
+  const { data: categoriesData } = useLiveQuery(categoriesQuery);
+  const { data: paymentSumsData } = useLiveQuery(paymentsQuery);
+  const paymentSumsByCategoryId = useMemo(
+    () => new Map(paymentSumsData.map((row) => [row.categoryId, Number(row.totalSumCents)])),
+    [paymentSumsData],
+  );
+  const expenseItems = useMemo<ExpenseItem[]>(
+    () =>
+      categoriesData.map((item) => {
+        const circleColor = item.color;
+        const icon = ICONS[item.icon] ?? CircleHelp;
+        const categoryTotalCents = paymentSumsByCategoryId.get(item.id) ?? 0;
+        const categoryTotalNoDecimals = Math.round(categoryTotalCents / 100);
+
+        return {
+          id: String(item.id),
+          userId: item.userId,
+          name: item.categoryName,
+          amount: categoryTotalNoDecimals,
+          circleColor,
+          backgroundColor: withAlpha(circleColor, 0.4),
+          icon,
+        };
+      }),
+    [categoriesData, paymentSumsByCategoryId],
+  );
+  const totalExpenseNoDecimals = useMemo(
+    () => Math.round(expenseItems.reduce((acc, item) => acc + Number(item.amount), 0)),
+    [expenseItems],
+  );
+
+  const handleOpenAddExpense = useCallback(
+    (item: ExpenseItem) => {
+      pushModal({
+        pathname: "/(modals)/addExpense",
+        params: {
+          category: item.name,
+          categoryId: item.id,
+          categoryUserId: String(item.userId),
+        },
+      });
+    },
+    [pushModal],
+  );
+
+  
   return (
     <>
       <TopBar
@@ -85,22 +129,17 @@ function HomeContent() {
         onNextPress={() => {}}
       />
       <Text style={styles.expenseTotal}>
-        Expense 47$
+        Expense ${totalExpenseNoDecimals}
       </Text>
       <ExpenseGrid
-        items={EXPENSES}
-        onPressItem={(item) =>
-          pushModal({
-            pathname: "/(modals)/addExpense",
-            params: { category: item.name },
-          })
-        }
+        items={expenseItems}
+        onPressItem={handleOpenAddExpense}
       />
     </>
   );
 }
 
-{/* Custom Text component to apply global font style */}
+// Custom Text component to apply global font style
 export function AppText(props: any) {
   return (
     <Text {...props} style={[{ fontFamily: "Inter_600Bold" }, props.style]} />

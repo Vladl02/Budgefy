@@ -1,7 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { SafeArea } from '@/src/components/SafeArea';
 import { Text, View, StyleSheet,ScrollView, Pressable, Image, TextInput, Alert, Keyboard } from 'react-native';
-import { useFonts } from "expo-font";
 import { Diamond,
          Pencil,
          User,

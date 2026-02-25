@@ -3,13 +3,13 @@ import { SafeArea } from "@/src/components/SafeArea";
 import { View, Text, FlatList, StyleSheet } from "react-native";
 import MonthlySummaryCard from "@/src/components/overview/donutCard";
 
-const DATA: Array<{
+const DATA: {
   id: string;
   title: string;
   spent: number;
   budget: number;
   icon: IconKey;
-}> = [
+}[] = [
   { id: "1", title: "Shopping", spent: 14, budget: 56, icon: "shopping" },
   { id: "2", title: "Food & Drinks", spent: 14, budget: 76.5, icon: "food" },
   { id: "3", title: "Home Bills", spent: 14, budget: 76.5, icon: "home" },

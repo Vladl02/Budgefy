@@ -5,6 +5,7 @@ import ExpenseBox from "./ExpenseBox";
 
 export type ExpenseItem = {
   id: string;
+  userId: number;
   amount: string | number;
   backgroundColor: string;
   circleColor: string;

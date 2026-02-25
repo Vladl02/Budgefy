@@ -3,7 +3,6 @@ import { View, Text, FlatList, StyleSheet, TextInput, KeyboardAvoidingView, Plat
 import { SafeArea } from "@/src/components/SafeArea";
 import ReportCard from "@/src/components/Reports/ReportsCard";
 import ReportsDropdown from "@/src/components/Reports/ReportsDropdown";
-import { ChevronDown } from "lucide-react-native";
 
 const DATA = [
   { id: "1", title: "Media Galaxy", date: "Dec 27 · Cash", amount: "RON 429.90" },

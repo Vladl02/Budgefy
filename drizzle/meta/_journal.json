@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1770840765752,
+      "tag": "0000_high_union_jack",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1770996531902,
+      "tag": "0001_living_the_santerians",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1771078837434,
+      "tag": "0002_worried_karma",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1771234774434,
+      "tag": "0003_lying_true_believers",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1771241300841,
+      "tag": "0004_ambiguous_toad_men",
+      "breakpoints": true
+    }
+  ]
+}

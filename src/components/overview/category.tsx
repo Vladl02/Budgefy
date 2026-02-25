@@ -4,9 +4,6 @@ import { AppText } from "@/src/app/(tabs)";
 import {
   ShoppingBag,
   ShoppingCart,
-  Store,
-  Cpu,
-  Warehouse,
   ChevronRight,
   Utensils,
   Home,
@@ -24,15 +21,6 @@ export const CATEGORY_STYLES = {
 export type IconKey = keyof typeof CATEGORY_STYLES;
 
 export type CategoryKey = keyof typeof CATEGORY_STYLES;
-// Icon map (add more if needed)
-const ICONS = {
-  shopping: ShoppingBag,
-  grocery: ShoppingCart,
-  store: Store,
-  electronics: Cpu,
-  wholesale: Warehouse,
-} as const;
-
 
 type CategoryCardProps = {
   title: string;

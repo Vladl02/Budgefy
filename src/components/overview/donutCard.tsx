@@ -57,7 +57,7 @@ const data = useMemo(
         rowAnims.push(new Animated.Value(collapsed ? 0 : 1));
       }
     }
-  }, [items.length, collapsed]);
+  }, [items.length, collapsed, rowAnims]);
 
   //animate the minimize icon rotation
     const animateRows = (toValue: 0 | 1, cb?: () => void) => {
