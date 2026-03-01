@@ -1,48 +1,58 @@
+import {
+  Calendar,
+  CalendarDays,
+  ChartColumnStacked,
+  ChevronLeft,
+  ChevronRight,
+  CreditCard,
+  Diamond,
+  DollarSign,
+  Flame,
+  Languages,
+  Pencil,
+  PiggyBank,
+  Receipt,
+  Repeat,
+  ShoppingBasket,
+  TrendingDown,
+  TrendingUp,
+  Trophy,
+  User,
+  X
+} from 'lucide-react-native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Text, View, StyleSheet,ScrollView, Pressable, Image, TextInput, Alert, Keyboard, Animated, Modal } from 'react-native';
-import { Diamond,
-         Pencil,
-         User,
-         Flame,
-         CalendarDays,
-         Receipt,
-         Trophy,
-         ChevronLeft,
-         ChartColumnStacked,
-         CreditCard,
-         PiggyBank,
-         Repeat,
-         Calendar,
-         DollarSign,
-         Languages,
-         TrendingDown,
-         TrendingUp,
-         ChevronRight,
-         ShoppingBasket,
-         X
+import { Alert, Animated, Image, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-
-        } from 'lucide-react-native';
-
-import * as ImagePicker from 'expo-image-picker';
-import * as Haptics from "expo-haptics";
 import { SlidingSheet } from '@/src/components/SlidingSheet';
-import { FlatList } from 'react-native-gesture-handler';
-import { useGuardedModalPush } from '@/src/hooks/guardForModals';
-import { drizzle, useLiveQuery } from "drizzle-orm/expo-sqlite";
-import { useSQLiteContext } from "expo-sqlite";
 import { payments, users } from "@/src/db/schema";
-import { eq } from "drizzle-orm";
-import { useFocusEffect } from "@react-navigation/native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useGuardedModalPush } from '@/src/hooks/guardForModals';
+import { useAuth } from "@/src/providers/AuthProvider";
 import {
   DEFAULT_BASE_CURRENCY,
   DEFAULT_LANGUAGE,
   getBaseCurrencyPreference,
   getLanguagePreference,
 } from "@/src/utils/preferences";
+import { useFocusEffect } from "@react-navigation/native";
+import { eq } from "drizzle-orm";
+import { drizzle, useLiveQuery } from "drizzle-orm/expo-sqlite";
+import * as Haptics from "expo-haptics";
+import * as ImagePicker from 'expo-image-picker';
+import { useSQLiteContext } from "expo-sqlite";
+import { FlatList } from 'react-native-gesture-handler';
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-const MONTHLY_PULSE_PARTICLES = [
+type PercentPosition = `${number}%`;
+
+type MonthlyPulseParticle = {
+  left: PercentPosition;
+  top: PercentPosition;
+  size: number;
+  drift: number;
+  peakOpacity: number;
+};
+
+const MONTHLY_PULSE_PARTICLES: ReadonlyArray<MonthlyPulseParticle> = [
   { left: "8%", top: "16%", size: 5, drift: 8, peakOpacity: 0.36 },
   { left: "14%", top: "38%", size: 3, drift: 7, peakOpacity: 0.24 },
   { left: "22%", top: "62%", size: 4, drift: 10, peakOpacity: 0.3 },
@@ -94,22 +104,27 @@ const LANGUAGE_REGION_MAP: Record<string, string> = {
   ID: "ID",
 };
 
-const toFlagEmoji = (regionCode: string): string =>
-  String.fromCodePoint(
-    ...regionCode
-      .toUpperCase()
-      .split("")
-      .map((char) => 127397 + char.charCodeAt(0)),
+const FALLBACK_FLAG = "\u{1F3F3}\u{FE0F}";
+
+const toFlagEmoji = (regionCode: unknown): string => {
+  if (typeof regionCode !== "string") return FALLBACK_FLAG;
+
+  const normalized = regionCode.trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(normalized)) return FALLBACK_FLAG;
+
+  return String.fromCodePoint(
+    ...normalized.split("").map((char) => 127397 + char.charCodeAt(0)),
   );
+};
 
 const currencyFlag = (currencyCode: string): string => {
   const regionCode = CURRENCY_REGION_MAP[currencyCode];
-  if (!regionCode) return "🏳️";
+  if (!regionCode) return FALLBACK_FLAG;
   return toFlagEmoji(regionCode);
 };
 const languageFlag = (languageCode: string): string => {
   const regionCode = LANGUAGE_REGION_MAP[languageCode];
-  if (!regionCode) return "🏳️";
+  if (!regionCode) return FALLBACK_FLAG;
   return toFlagEmoji(regionCode);
 };
 
@@ -158,6 +173,7 @@ export default function Settings() {
       void loadPreferences();
     }, [loadPreferences]),
   );
+  const { signOut } = useAuth();
   const usersQuery = db
     .select({
       id: users.id,
@@ -325,20 +341,22 @@ export default function Settings() {
     map.set(key, (map.get(key) ?? 0) + item.sumCents);
     return map;
   }, new Map<string, number>());
-  let highestSpendDayKey: string | null = null;
-  let highestSpendDayCents = 0;
-  thisMonthDayTotals.forEach((total, key) => {
-    if (total > highestSpendDayCents) {
-      highestSpendDayCents = total;
-      highestSpendDayKey = key;
-    }
-  });
-  const highestSpendDayLabel = highestSpendDayKey
-    ? (() => {
-        const [year, month, day] = highestSpendDayKey.split("-").map(Number);
-        return new Date(year, month - 1, day).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-      })()
-    : "N/A";
+  const highestSpendDay = Array.from(thisMonthDayTotals.entries()).reduce<{
+    key: string | null;
+    cents: number;
+  }>(
+    (best, [key, total]) => (total > best.cents ? { key, cents: total } : best),
+    { key: null, cents: 0 },
+  );
+  const highestSpendDayKey = highestSpendDay.key;
+  const highestSpendDayCents = highestSpendDay.cents;
+  const highestSpendDayLabel =
+    typeof highestSpendDayKey === "string"
+      ? (() => {
+          const [year, month, day] = highestSpendDayKey.split("-").map(Number);
+          return new Date(year, month - 1, day).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+        })()
+      : "N/A";
   const weekdayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const weekdayCounts = [0, 0, 0, 0, 0, 0, 0];
   paymentRecords.forEach((item) => {
@@ -408,6 +426,15 @@ export default function Settings() {
   const openSheet = (option: string) => {
     setActiveOption(option);
     setSheetVisible(true);
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to sign out";
+      Alert.alert("Sign out failed", message);
+    }
   };
   useEffect(() => {
     heroAnim.setValue(0);
@@ -717,7 +744,12 @@ export default function Settings() {
         contentContainerStyle={[styles.scrollContent, { paddingBottom: listBottomPadding }]}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.pageTitle}>Settings</Text>
+        <View style={styles.pageHeaderRow}>
+          <Text style={styles.pageTitle}>Settings</Text>
+          <Pressable onPress={() => void handleSignOut()} style={styles.signOutButton}>
+            <Text style={styles.signOutButtonText}>Sign out</Text>
+          </Pressable>
+        </View>
 
         <Animated.View
           style={[
@@ -1267,7 +1299,25 @@ const styles = StyleSheet.create({
     color: "#111827",
     fontFamily: "Inter_700Bold",
     marginLeft: 4,
+  },
+  pageHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 14,
+  },
+  signOutButton: {
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    backgroundColor: "#FFFFFF",
+  },
+  signOutButtonText: {
+    color: "#111827",
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
   },
   profileCard: {
     width: "100%",
@@ -2039,3 +2089,4 @@ optionCard: {
     fontFamily: "Inter_700Bold",
   },
 });
+

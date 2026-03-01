@@ -1,6 +1,5 @@
 import { useSQLiteContext } from "expo-sqlite";
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
 
 import { preloadAllRecommendations } from "@/src/utils/recommendations";
 
@@ -13,7 +12,6 @@ const RecommendationStoreContext = createContext<RecommendationStoreContextValue
 export function RecommendationStoreProvider({ children }: { children: React.ReactNode }) {
   const db = useSQLiteContext();
   const [cacheVersion, setCacheVersion] = useState(0);
-  const [isBootstrapped, setIsBootstrapped] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -22,7 +20,6 @@ export function RecommendationStoreProvider({ children }: { children: React.Reac
       await preloadAllRecommendations(db);
       if (cancelled) return;
       setCacheVersion((current) => current + 1);
-      setIsBootstrapped(true);
     };
 
     void bootstrap();
@@ -36,14 +33,6 @@ export function RecommendationStoreProvider({ children }: { children: React.Reac
     () => ({ cacheVersion }),
     [cacheVersion],
   );
-
-  if (!isBootstrapped) {
-    return (
-      <View style={styles.loadingRoot}>
-        <ActivityIndicator size="large" />
-      </View>
-    );
-  }
 
   return (
     <RecommendationStoreContext.Provider value={value}>
@@ -59,11 +48,3 @@ export const useRecommendationStore = (): RecommendationStoreContextValue => {
   }
   return context;
 };
-
-const styles = StyleSheet.create({
-  loadingRoot: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-});

@@ -13,10 +13,10 @@ import {
 import { useFonts } from "expo-font";
 import type { LucideIcon } from "lucide-react-native";
 import {
-  Banknote,
   Baby,
-  BriefcaseBusiness,
+  Banknote,
   BookOpen,
+  BriefcaseBusiness,
   Bus,
   Car,
   CircleHelp,
@@ -32,8 +32,8 @@ import {
   House,
   PawPrint,
   Phone,
-  Plane,
   PiggyBank,
+  Plane,
   ShieldPlus,
   ShoppingBag,
   ShoppingBasket,
@@ -44,11 +44,11 @@ import {
   Tv,
   Utensils,
   Wrench,
-  Zap,
   X,
+  Zap,
 } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Animated, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Animated, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { categoriesForMonth, paymentSumsByCategory } from "@/src/utils/queries";
@@ -749,7 +749,13 @@ export default function HomeScreen() {
     Inter_600SemiBold,
     Inter_700Bold,
   })
-  if (!fontsLoaded) return null;
+  if (!fontsLoaded) {
+    return (
+      <View style={styles.fontLoading}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.background}>
@@ -766,6 +772,12 @@ const styles = StyleSheet.create({
   background: {
     backgroundColor: "#ffffffff",
     height: "100%",
+  },
+  fontLoading: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#ffffffff",
   },
   expenseTotal: {
     textAlign: "center",

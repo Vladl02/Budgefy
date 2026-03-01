@@ -36,6 +36,13 @@
       "when": 1771241300841,
       "tag": "0004_ambiguous_toad_men",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1772310000000,
+      "tag": "0005_fair_squadron_supreme",
+      "breakpoints": true
     }
   ]
 }

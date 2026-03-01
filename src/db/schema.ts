@@ -27,6 +27,7 @@ export const payments = sqliteTable("payments", {
     id: integer("id").primaryKey({ autoIncrement: true}),
     sum: integer("sum").notNull(),
     marketName: text("market_name"),
+    sourceType: text("source_type").notNull().default("manual"),
     userId: integer("user_id")
         .notNull()
         .references(() => users.id),
@@ -40,7 +41,11 @@ export const payments = sqliteTable("payments", {
         .notNull()
         .default(sql`(unixepoch())`),
     receiptPhotoLink: text("receipt_photo_link")
-})
+},
+    (table) => [
+        index("payments_user_timed_idx").on(table.userId, table.timedAt),
+    ],
+)
 
 
 export const products = sqliteTable("products", {
@@ -48,6 +53,10 @@ export const products = sqliteTable("products", {
     name: text("name")
         .notNull(),
     price: integer("price").notNull(),
+    categoryId: integer("category_id")
+        .references(() => categories.id),
+    originType: text("origin_type").notNull().default("manual"),
+    isPlaceholder: integer("is_placeholder").notNull().default(0),
     userId: integer("user_id")
         .notNull()
         .references(() => users.id),
@@ -56,7 +65,13 @@ export const products = sqliteTable("products", {
         .references(() => payments.id),
     firstSubcategory: text("first_subcategory"),
     otherSubcategories: text("other_subcategories")
-})
+},
+    (table) => [
+        index("products_payment_idx").on(table.paymentId),
+        index("products_category_idx").on(table.categoryId),
+        index("products_category_payment_idx").on(table.categoryId, table.paymentId),
+    ],
+)
 
 export const subcategoryPresets = sqliteTable(
     "subcategory_presets",
