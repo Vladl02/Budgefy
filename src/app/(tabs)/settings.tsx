@@ -31,6 +31,7 @@ import { drizzle, useLiveQuery } from "drizzle-orm/expo-sqlite";
 import { useSQLiteContext } from "expo-sqlite";
 import { payments, users } from "@/src/db/schema";
 import { eq } from "drizzle-orm";
+import { useAuth } from "@/src/providers/AuthProvider";
 
 
 export default function Settings() {
@@ -53,6 +54,7 @@ export default function Settings() {
   const prefsAnim = useRef(new Animated.Value(0)).current;
   const dbExpo = useSQLiteContext();
   const db = drizzle(dbExpo);
+  const { signOut } = useAuth();
   const usersQuery = db
     .select({
       id: users.id,
@@ -216,6 +218,15 @@ export default function Settings() {
   const openSheet = (option: string) => {
     setActiveOption(option);
     setSheetVisible(true);
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to sign out";
+      Alert.alert("Sign out failed", message);
+    }
   };
   useEffect(() => {
     heroAnim.setValue(0);
@@ -496,7 +507,12 @@ export default function Settings() {
   return (
     <Pressable style={styles.screen} onPress={Keyboard.dismiss}>
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <Text style={styles.pageTitle}>Settings</Text>
+        <View style={styles.pageHeaderRow}>
+          <Text style={styles.pageTitle}>Settings</Text>
+          <Pressable onPress={() => void handleSignOut()} style={styles.signOutButton}>
+            <Text style={styles.signOutButtonText}>Sign out</Text>
+          </Pressable>
+        </View>
 
         <Animated.View
           style={[
@@ -896,7 +912,25 @@ const styles = StyleSheet.create({
     color: "#111827",
     fontFamily: "Inter_700Bold",
     marginLeft: 4,
+  },
+  pageHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 14,
+  },
+  signOutButton: {
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    backgroundColor: "#FFFFFF",
+  },
+  signOutButtonText: {
+    color: "#111827",
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
   },
   profileCard: {
     width: "100%",

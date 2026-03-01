@@ -1,10 +1,16 @@
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
-import { PlatformPressable, Text } from "@react-navigation/elements";
+import { Text } from "@react-navigation/elements";
 import { useTheme } from "@react-navigation/native";
-import { ChartPie, House, ScanLine, Scroll, Settings, X } from "lucide-react-native";
-import { useState } from "react";
-import { Modal, Pressable, StyleSheet, View } from "react-native";
+import { ChartPie, House, ScanLine, Scroll, Settings } from "lucide-react-native";
+import { Alert, InteractionManager, Pressable, StyleSheet, View } from "react-native";
+import { useCallback, useRef } from "react";
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSQLiteContext } from "expo-sqlite";
+import {
+  analyzeReceiptWithSupabase,
+  saveScannedReceiptsAsSpending,
+  scanReceiptImages,
+} from "@/src/utils/receiptScanner";
 
 const ICONS_BY_ROUTE = {
   index: House,
@@ -17,9 +23,50 @@ const ICONS_BY_ROUTE = {
 
 export function MyTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const { colors } = useTheme();
-  const [isScanOpen, setIsScanOpen] = useState(false);
+  const db = useSQLiteContext();
+  const scanLockRef = useRef(false);
   
   const insets = useSafeAreaInsets()
+
+  const handleScanShortcut = useCallback(async () => {
+    if (scanLockRef.current) return;
+
+    scanLockRef.current = true;
+    try {
+      const scanResult = await scanReceiptImages();
+
+      if (scanResult.status === "unavailable_web") {
+        Alert.alert("Unavailable on web", "Document scanning works on Android/iOS dev builds.");
+        return;
+      }
+
+      if (scanResult.status !== "success") {
+        return;
+      }
+
+      if (scanResult.scannedImages.length > 0) {
+        void analyzeReceiptWithSupabase(scanResult.scannedImages[0]);
+      }
+
+      InteractionManager.runAfterInteractions(() => {
+        void saveScannedReceiptsAsSpending(db, scanResult.scannedImages)
+          .then((saveResult) => {
+            if (saveResult.status === "no_user_category") {
+              Alert.alert("Cannot save", "No user/category found to attach this scanned receipt.");
+            }
+          })
+          .catch((error) => {
+            console.error("Failed to persist scanned receipt from tab shortcut:", error);
+            Alert.alert("Save failed", "Scanner closed, but receipt could not be saved.");
+          });
+      });
+    } catch (error) {
+      console.error("Failed to scan receipt from tab shortcut:", error);
+      Alert.alert("Scan failed", "Could not open/save scanner result.");
+    } finally {
+      scanLockRef.current = false;
+    }
+  }, [db]);
 
   return (
     <View style={[styles.tabbar, { backgroundColor: colors.card, bottom:  insets.bottom+10}]}>
@@ -50,22 +97,27 @@ export function MyTabBar({ state, descriptors, navigation }: BottomTabBarProps) 
             : label;
 
         const onPress = () => {
+          if (route.name === "scan") {
+            return;
+          }
+
           const event = navigation.emit({
-            type: 'tabPress',
+            type: "tabPress",
             target: route.key,
             canPreventDefault: true,
           });
 
-          if (isCenter) {
-            if (!event.defaultPrevented) {
-              setIsScanOpen(true);
-            }
-            return;
-          }
-
           if (!isFocused && !event.defaultPrevented) {
             navigation.navigate(route.name, route.params);
           }
+        };
+
+        const onPressIn = () => {
+          if (route.name !== "scan") return;
+
+          requestAnimationFrame(() => {
+            void handleScanShortcut();
+          });
         };
 
         const onLongPress = () => {
@@ -82,6 +134,7 @@ export function MyTabBar({ state, descriptors, navigation }: BottomTabBarProps) 
               accessibilityLabel={options.tabBarAccessibilityLabel}
               testID={options.tabBarButtonTestID}
               onPress={onPress}
+              onPressIn={onPressIn}
               onLongPress={onLongPress}
               style={({ pressed }) => [
                 styles.iconBubble,
@@ -109,17 +162,6 @@ export function MyTabBar({ state, descriptors, navigation }: BottomTabBarProps) 
           </View>
         );
       })}
-      <Modal
-        visible={isScanOpen}
-        animationType="slide"
-        onRequestClose={() => setIsScanOpen(false)}
-      >
-        <View style={styles.modalHeader}>
-          <PlatformPressable onPress={() => setIsScanOpen(false)} style={styles.modalClose}>
-            <X size={20} color="#3B3B3B" />
-          </PlatformPressable>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -188,19 +230,5 @@ const styles = StyleSheet.create({
   },
   labelCenter: {
     marginTop: 1,
-  },
-  modalHeader: {
-    height: 56,
-    alignItems: "flex-end",
-    justifyContent: "center",
-    paddingHorizontal: 16,
-  },
-  modalClose: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#EFEFEF",
   },
 });

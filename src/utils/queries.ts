@@ -1,4 +1,4 @@
-import { categories, payments } from "@/src/db/schema";
+import { categories, payments, products } from "@/src/db/schema";
 import { eq, sql } from "drizzle-orm";
 import type { ExpoSQLiteDatabase } from "drizzle-orm/expo-sqlite";
 
@@ -24,11 +24,15 @@ export const categoriesForMonth = (
 };
 
 export const paymentSumsByCategory = (db: ExpoSQLiteDatabase) => {
+  const categoryExpr = sql<number>`coalesce(${products.categoryId}, ${payments.categoryId})`;
+  const totalExpr = sql<number>`coalesce(sum(case when ${products.id} is null then ${payments.sum} else ${products.price} end), 0)`;
+
   return db
     .select({
-      categoryId: payments.categoryId,
-      totalSumCents: sql<number>`coalesce(sum(${payments.sum}), 0)`,
+      categoryId: categoryExpr,
+      totalSumCents: totalExpr,
     })
     .from(payments)
-    .groupBy(payments.categoryId);
+    .leftJoin(products, eq(products.paymentId, payments.id))
+    .groupBy(categoryExpr);
 };

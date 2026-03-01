@@ -24,7 +24,7 @@ import {
   Utensils,
 } from "lucide-react-native";
 import { useCallback, useMemo } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
 import { categoriesForMonth, paymentSumsByCategory } from "@/src/utils/queries";
 import { drizzle, useLiveQuery } from "drizzle-orm/expo-sqlite";
@@ -154,7 +154,13 @@ export default function HomeScreen() {
     Inter_600SemiBold,
     Inter_700Bold,
   })
-  if (!fontsLoaded) return null;
+  if (!fontsLoaded) {
+    return (
+      <View style={styles.fontLoading}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.background}>
@@ -171,6 +177,12 @@ const styles = StyleSheet.create({
   background: {
     backgroundColor: "#ffffffff",
     height: "100%",
+  },
+  fontLoading: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#ffffffff",
   },
   expenseTotal: {
     textAlign: "center",

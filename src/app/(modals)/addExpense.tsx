@@ -687,7 +687,9 @@ export default function AddExpense() {
 
     const amountInCents = Math.round((parsedAmount + Number.EPSILON) * 100);
     const marketName = selectedShopName?.trim() || null;
-    const representativeProductName = productName.trim() || "Expense";
+    const trimmedProductName = productName.trim();
+    const representativeProductName = trimmedProductName || "Manual entry";
+    const isPlaceholderProduct = trimmedProductName ? 0 : 1;
 
     try {
       isSavingExpenseRef.current = true;
@@ -713,9 +715,9 @@ export default function AddExpense() {
       }
 
       const paymentResult = await dbExpo.runAsync(
-        `INSERT INTO payments (sum, market_name, user_id, category_id)
-         VALUES (?, ?, ?, ?)`,
-        [amountInCents, marketName, selectedCategoryUserId, resolvedCategoryId],
+        `INSERT INTO payments (sum, market_name, source_type, user_id, category_id)
+         VALUES (?, ?, ?, ?, ?)`,
+        [amountInCents, marketName, "manual", selectedCategoryUserId, resolvedCategoryId],
       );
 
       const paymentId = Number(paymentResult.lastInsertRowId);
@@ -724,11 +726,14 @@ export default function AddExpense() {
       }
 
       await dbExpo.runAsync(
-        `INSERT INTO products (name, price, user_id, payment_id, first_subcategory, other_subcategories)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO products (name, price, category_id, origin_type, is_placeholder, user_id, payment_id, first_subcategory, other_subcategories)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           representativeProductName,
           amountInCents,
+          resolvedCategoryId,
+          "manual",
+          isPlaceholderProduct,
           selectedCategoryUserId,
           paymentId,
           selectedSubcategory ?? null,

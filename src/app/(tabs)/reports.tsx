@@ -18,7 +18,7 @@ import {
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Animated,
@@ -53,6 +53,10 @@ interface ReceiptItem {
   receiptPhotoUri?: string | null;
   status: "processed" | "needs action" | "failed";
 }
+
+const FILTER_OPTIONS = ["All", "Receipts", "Cash", "Card", "Needs Action"] as const;
+const MONTH_LABEL_FORMAT: Intl.DateTimeFormatOptions = { month: "long", year: "numeric" };
+const formatMonthLabel = (date: Date): string => date.toLocaleDateString("en-US", MONTH_LABEL_FORMAT);
 
 // --- INITIAL DATA ---
 const INITIAL_DATA: ReceiptItem[] = [
@@ -217,10 +221,7 @@ export default function Reports() {
   const db = drizzle(dbExpo);
   const categoriesQuery = useMemo(() => categoriesForMonth(db, selectedMonthStart), [db, selectedMonthStart]);
   const { data: categoriesData } = useLiveQuery(categoriesQuery);
-  const currentMonthLabel = useMemo(
-    () => selectedMonthStart.toLocaleDateString("en-US", { month: "long", year: "numeric" }),
-    [selectedMonthStart],
-  );
+  const currentMonthLabel = useMemo(() => formatMonthLabel(selectedMonthStart), [selectedMonthStart]);
 
   const sortedReceipts = useMemo(() => {
     return [...receipts].sort((a, b) => new Date(b.fullDate).getTime() - new Date(a.fullDate).getTime());
@@ -289,19 +290,26 @@ export default function Reports() {
     return monthFilteredReceipts.filter((r) => r.date.includes(activeFilter));
   }, [activeFilter, monthFilteredReceipts]);
 
-  const handleOpenReceipt = (item: ReceiptItem) => {
+  const handleOpenReceipt = useCallback((item: ReceiptItem) => {
     setSelectedReceipt(item);
     setModalVisible(true);
-  };
+  }, []);
 
-  const handleSaveReceipt = (updatedItem: ReceiptItem) => {
+  const handleSaveReceipt = useCallback((updatedItem: ReceiptItem) => {
     setReceipts((prev) => {
       const exists = prev.find((r) => r.id === updatedItem.id);
       if (exists) return prev.map((r) => (r.id === updatedItem.id ? updatedItem : r));
       return [updatedItem, ...prev];
     });
     setModalVisible(false);
-  };
+  }, []);
+
+  const handleCloseReceiptModal = useCallback(() => setModalVisible(false), []);
+  const handleOpenMonthPicker = useCallback(() => setShowMonthPicker(true), []);
+  const handleCloseMonthPicker = useCallback(() => setShowMonthPicker(false), []);
+  const handleOpenTrendInfo = useCallback(() => setShowTrendInfo(true), []);
+  const handleCloseTrendInfo = useCallback(() => setShowTrendInfo(false), []);
+  const handleFilterChange = useCallback((filter: string) => setActiveFilter(filter), []);
 
   const categoryOptions = useMemo(() => {
     if (categoriesData.length > 0) {
@@ -336,8 +344,70 @@ export default function Reports() {
     return Array.from(monthMap.values()).sort((a, b) => b.getTime() - a.getTime());
   }, [receipts, selectedMonthStart]);
   const monthOptions = useMemo(
-    () => availableMonthStarts.map((date) => date.toLocaleDateString("en-US", { month: "long", year: "numeric" })),
+    () => availableMonthStarts.map((date) => formatMonthLabel(date)),
     [availableMonthStarts],
+  );
+  const monthStartByLabel = useMemo(() => {
+    const map = new Map<string, Date>();
+    availableMonthStarts.forEach((date) => {
+      map.set(formatMonthLabel(date), date);
+    });
+    return map;
+  }, [availableMonthStarts]);
+  const handleMonthSelect = useCallback(
+    (label: string) => {
+      const month = monthStartByLabel.get(label);
+      if (month) {
+        setSelectedMonthStart(new Date(month.getFullYear(), month.getMonth(), 1));
+      }
+      setShowMonthPicker(false);
+    },
+    [monthStartByLabel],
+  );
+
+  const keyExtractor = useCallback((item: ReceiptItem) => item.id, []);
+  const renderReceiptItem = useCallback(
+    ({ item }: { item: ReceiptItem }) => (
+      <TouchableOpacity activeOpacity={0.7} onPress={() => handleOpenReceipt(item)}>
+        <ReportCard
+          title={item.title}
+          date={item.date}
+          amount={item.amount}
+          status={item.status}
+          receiptPhotoUri={item.receiptPhotoUri}
+        />
+      </TouchableOpacity>
+    ),
+    [handleOpenReceipt],
+  );
+  const listHeader = useMemo(
+    () => (
+      <View style={styles.controlsSection}>
+        <View style={styles.searchBar}>
+          <Search size={20} color="#8E8E93" />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search reports..."
+            placeholderTextColor="#8E8E93"
+          />
+        </View>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
+          {FILTER_OPTIONS.map((filter) => (
+            <TouchableOpacity
+              key={filter}
+              style={[styles.filterChip, activeFilter === filter && styles.filterChipActive]}
+              onPress={() => handleFilterChange(filter)}
+            >
+              <Text style={[styles.filterText, activeFilter === filter && styles.filterTextActive]}>
+                {filter}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+    ),
+    [activeFilter, handleFilterChange],
   );
 
   return (
@@ -349,7 +419,7 @@ export default function Reports() {
             <View>
               <Text style={styles.pageTitle}>Reports</Text>
             </View>
-            <TouchableOpacity style={styles.headerBadge} activeOpacity={0.85} onPress={() => setShowMonthPicker(true)}>
+            <TouchableOpacity style={styles.headerBadge} activeOpacity={0.85} onPress={handleOpenMonthPicker}>
               <View style={styles.headerBadgeDot} />
               <Text style={styles.headerBadgeText}>{currentMonthLabel}</Text>
               <ChevronDown size={14} color="#111827" style={{ marginLeft: 6 }} />
@@ -363,7 +433,7 @@ export default function Reports() {
             </View>
             <TouchableOpacity
               activeOpacity={0.85}
-              onPress={() => setShowTrendInfo(true)}
+              onPress={handleOpenTrendInfo}
               style={[styles.trendBadge, { backgroundColor: trendBackgroundColor }]}
             >
               <TrendIcon size={14} color={trendColor} />
@@ -375,45 +445,14 @@ export default function Reports() {
         {/* List */}
         <FlatList
           data={filteredReceipts}
-          keyExtractor={(item) => item.id}
+          keyExtractor={keyExtractor}
+          renderItem={renderReceiptItem}
+          removeClippedSubviews
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={7}
           contentContainerStyle={styles.listContent}
-          ListHeaderComponent={
-            <View style={styles.controlsSection}>
-              <View style={styles.searchBar}>
-                <Search size={20} color="#8E8E93" />
-                <TextInput
-                  style={styles.searchInput}
-                  placeholder="Search reports..."
-                  placeholderTextColor="#8E8E93"
-                />
-              </View>
-
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
-                {["All", "Receipts", "Cash", "Card", "Needs Action"].map((filter) => (
-                  <TouchableOpacity
-                    key={filter}
-                    style={[styles.filterChip, activeFilter === filter && styles.filterChipActive]}
-                    onPress={() => setActiveFilter(filter)}
-                  >
-                    <Text style={[styles.filterText, activeFilter === filter && styles.filterTextActive]}>
-                      {filter}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          }
-          renderItem={({ item }) => (
-            <TouchableOpacity activeOpacity={0.7} onPress={() => handleOpenReceipt(item)}>
-              <ReportCard
-                title={item.title}
-                date={item.date}
-                amount={item.amount}
-                status={item.status}
-                receiptPhotoUri={item.receiptPhotoUri}
-              />
-            </TouchableOpacity>
-          )}
+          ListHeaderComponent={listHeader}
         />
       </SafeAreaView>
 
@@ -423,7 +462,7 @@ export default function Reports() {
         item={selectedReceipt}
         categoryOptions={categoryOptions}
         categoryAccentMap={categoryAccentMap}
-        onClose={() => setModalVisible(false)}
+        onClose={handleCloseReceiptModal}
         onSave={handleSaveReceipt}
       />
       <SelectionModal
@@ -431,19 +470,11 @@ export default function Reports() {
         title="Select Month"
         options={monthOptions}
         selected={currentMonthLabel}
-        onClose={() => setShowMonthPicker(false)}
-        onSelect={(label: string) => {
-          const month = availableMonthStarts.find(
-            (date) => date.toLocaleDateString("en-US", { month: "long", year: "numeric" }) === label,
-          );
-          if (month) {
-            setSelectedMonthStart(new Date(month.getFullYear(), month.getMonth(), 1));
-          }
-          setShowMonthPicker(false);
-        }}
+        onClose={handleCloseMonthPicker}
+        onSelect={handleMonthSelect}
       />
-      <Modal visible={showTrendInfo} transparent animationType="fade" onRequestClose={() => setShowTrendInfo(false)}>
-        <TouchableOpacity style={styles.trendInfoOverlay} activeOpacity={1} onPress={() => setShowTrendInfo(false)}>
+      <Modal visible={showTrendInfo} transparent animationType="fade" onRequestClose={handleCloseTrendInfo}>
+        <TouchableOpacity style={styles.trendInfoOverlay} activeOpacity={1} onPress={handleCloseTrendInfo}>
           <View style={styles.trendInfoCard}>
             <View style={styles.trendInfoHeaderRow}>
               <View style={styles.trendInfoTitleWrap}>
@@ -456,7 +487,7 @@ export default function Reports() {
                 </View>
               </View>
               <TouchableOpacity
-                onPress={() => setShowTrendInfo(false)}
+                onPress={handleCloseTrendInfo}
                 style={styles.trendInfoCloseBtn}
                 hitSlop={8}
               >
@@ -507,7 +538,21 @@ const STATUS_CONFIG = {
   failed: { bg: "#FFEBEE", color: "#FF3B30", label: "Failed" },
 };
 
-function ReportCard({ title, date, amount, status, receiptPhotoUri }: any) {
+type ReportCardProps = {
+  title: string;
+  date: string;
+  amount: string;
+  status: "processed" | "needs action" | "failed";
+  receiptPhotoUri?: string | null;
+};
+
+const ReportCard = React.memo(function ReportCard({
+  title,
+  date,
+  amount,
+  status,
+  receiptPhotoUri,
+}: ReportCardProps) {
   const config = STATUS_CONFIG[status as keyof typeof STATUS_CONFIG] || STATUS_CONFIG.processed;
 
   return (
@@ -533,7 +578,7 @@ function ReportCard({ title, date, amount, status, receiptPhotoUri }: any) {
       </View>
     </View>
   );
-}
+});
 
 // --- RECEIPT DETAIL MODAL (NEW DESIGN: Sticky summary + sticky Save) ---
 function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap, onClose, onSave }: any) {
