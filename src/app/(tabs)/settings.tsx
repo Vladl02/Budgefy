@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Text, View, StyleSheet,ScrollView, Pressable, Image, TextInput, Alert, Keyboard, Animated, Modal } from 'react-native';
 import { Diamond,
          Pencil,
@@ -15,6 +15,8 @@ import { Diamond,
          Calendar,
          DollarSign,
          Languages,
+         TrendingDown,
+         TrendingUp,
          ChevronRight,
          ShoppingBasket,
          X
@@ -31,9 +33,93 @@ import { drizzle, useLiveQuery } from "drizzle-orm/expo-sqlite";
 import { useSQLiteContext } from "expo-sqlite";
 import { payments, users } from "@/src/db/schema";
 import { eq } from "drizzle-orm";
+import { useFocusEffect } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  DEFAULT_BASE_CURRENCY,
+  DEFAULT_LANGUAGE,
+  getBaseCurrencyPreference,
+  getLanguagePreference,
+} from "@/src/utils/preferences";
 
+const MONTHLY_PULSE_PARTICLES = [
+  { left: "8%", top: "16%", size: 5, drift: 8, peakOpacity: 0.36 },
+  { left: "14%", top: "38%", size: 3, drift: 7, peakOpacity: 0.24 },
+  { left: "22%", top: "62%", size: 4, drift: 10, peakOpacity: 0.3 },
+  { left: "28%", top: "12%", size: 2, drift: 6, peakOpacity: 0.22 },
+  { left: "34%", top: "30%", size: 3, drift: 7, peakOpacity: 0.28 },
+  { left: "41%", top: "52%", size: 2, drift: 6, peakOpacity: 0.2 },
+  { left: "48%", top: "70%", size: 6, drift: 11, peakOpacity: 0.33 },
+  { left: "53%", top: "84%", size: 3, drift: 8, peakOpacity: 0.26 },
+  { left: "58%", top: "18%", size: 4, drift: 9, peakOpacity: 0.32 },
+  { left: "64%", top: "34%", size: 2, drift: 7, peakOpacity: 0.2 },
+  { left: "69%", top: "48%", size: 3, drift: 8, peakOpacity: 0.3 },
+  { left: "74%", top: "78%", size: 2, drift: 6, peakOpacity: 0.21 },
+  { left: "79%", top: "26%", size: 5, drift: 10, peakOpacity: 0.35 },
+  { left: "84%", top: "12%", size: 3, drift: 8, peakOpacity: 0.25 },
+  { left: "88%", top: "68%", size: 4, drift: 9, peakOpacity: 0.31 },
+  { left: "92%", top: "44%", size: 2, drift: 6, peakOpacity: 0.2 },
+  { left: "18%", top: "82%", size: 3, drift: 7, peakOpacity: 0.24 },
+  { left: "62%", top: "64%", size: 4, drift: 9, peakOpacity: 0.27 },
+];
+
+const CURRENCY_REGION_MAP: Record<string, string> = {
+  USD: "US",
+  EUR: "EU",
+  GBP: "GB",
+  JPY: "JP",
+  CAD: "CA",
+  AUD: "AU",
+  CHF: "CH",
+  RON: "RO",
+};
+const LANGUAGE_REGION_MAP: Record<string, string> = {
+  EN: "US",
+  ES: "ES",
+  FR: "FR",
+  DE: "DE",
+  ZH: "CN",
+  JA: "JP",
+  RU: "RU",
+  AR: "SA",
+  HI: "IN",
+  PT: "PT",
+  IT: "IT",
+  KO: "KR",
+  NL: "NL",
+  SV: "SE",
+  TR: "TR",
+  PL: "PL",
+  VI: "VN",
+  ID: "ID",
+};
+
+const toFlagEmoji = (regionCode: string): string =>
+  String.fromCodePoint(
+    ...regionCode
+      .toUpperCase()
+      .split("")
+      .map((char) => 127397 + char.charCodeAt(0)),
+  );
+
+const currencyFlag = (currencyCode: string): string => {
+  const regionCode = CURRENCY_REGION_MAP[currencyCode];
+  if (!regionCode) return "🏳️";
+  return toFlagEmoji(regionCode);
+};
+const languageFlag = (languageCode: string): string => {
+  const regionCode = LANGUAGE_REGION_MAP[languageCode];
+  if (!regionCode) return "🏳️";
+  return toFlagEmoji(regionCode);
+};
 
 export default function Settings() {
+  const insets = useSafeAreaInsets();
+  const [baseCurrencyCode, setBaseCurrencyCode] = useState(DEFAULT_BASE_CURRENCY);
+  const [languageCode, setLanguageCode] = useState(DEFAULT_LANGUAGE);
+  const baseCurrencyBadge = `${currencyFlag(baseCurrencyCode)} ${baseCurrencyCode}`;
+  const languageBadge = `${languageFlag(languageCode)} ${languageCode}`;
+  const listBottomPadding = insets.bottom + 92;
 
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   //sheet options
@@ -51,8 +137,27 @@ export default function Settings() {
   const heroAnim = useRef(new Animated.Value(0)).current;
   const upgradeAnim = useRef(new Animated.Value(0)).current;
   const prefsAnim = useRef(new Animated.Value(0)).current;
+  const pulseParticleAnims = useRef(MONTHLY_PULSE_PARTICLES.map(() => new Animated.Value(0))).current;
   const dbExpo = useSQLiteContext();
   const db = drizzle(dbExpo);
+  const loadPreferences = useCallback(async () => {
+    try {
+      const [storedCurrency, storedLanguage] = await Promise.all([
+        getBaseCurrencyPreference(dbExpo),
+        getLanguagePreference(dbExpo),
+      ]);
+      setBaseCurrencyCode(storedCurrency.toUpperCase());
+      setLanguageCode(storedLanguage.toUpperCase());
+    } catch (error) {
+      console.error("Failed to load app preferences", error);
+    }
+  }, [dbExpo]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadPreferences();
+    }, [loadPreferences]),
+  );
   const usersQuery = db
     .select({
       id: users.id,
@@ -67,6 +172,7 @@ export default function Settings() {
   const paymentsQuery = db
     .select({
       createdAt: payments.createdAt,
+      sum: payments.sum,
     })
     .from(payments)
     .where(eq(payments.userId, activeUserId));
@@ -86,10 +192,24 @@ export default function Settings() {
     const day = String(date.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
   };
+  const formatCurrency = (cents: number): string => {
+    const value = (cents || 0) / 100;
+    return `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+  const paymentRecords = paymentsData
+    .map((item) => {
+      const createdAt = toDate(item.createdAt as Date | number | string | null | undefined);
+      if (!createdAt) return null;
+      return {
+        createdAt,
+        sumCents: Number(item.sum ?? 0),
+      };
+    })
+    .filter((item): item is { createdAt: Date; sumCents: number } => item !== null);
   const dayKeys = Array.from(
     new Set(
-      paymentsData
-        .map((item) => toDayKey(item.createdAt as Date | number | string | null | undefined))
+      paymentRecords
+        .map((item) => toDayKey(item.createdAt))
         .filter((key): key is string => key !== null),
     ),
   ).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
@@ -139,7 +259,7 @@ export default function Settings() {
 
   const currentStreak = calculateCurrentStreak(dayKeys);
   const bestStreak = calculateBestStreak(dayKeys);
-  const receiptsScanned = paymentsData.length;
+  const receiptsScanned = paymentRecords.length;
 
   const registrationDate = toDate(userData[0]?.createdAt as Date | number | string | null | undefined);
   const daysActive = registrationDate
@@ -158,15 +278,12 @@ export default function Settings() {
     : 1;
 
   const thisMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  const thisMonthTitle = thisMonthStart.toLocaleDateString("en-US", { month: "long", year: "numeric" });
   const previousMonthStart = new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1);
-  const thisMonthScanned = paymentsData.filter((item) => {
-    const created = toDate(item.createdAt as Date | number | string | null | undefined);
-    return !!created && created >= thisMonthStart;
-  }).length;
-  const previousMonthScanned = paymentsData.filter((item) => {
-    const created = toDate(item.createdAt as Date | number | string | null | undefined);
-    return !!created && created >= previousMonthStart && created < thisMonthStart;
-  }).length;
+  const thisMonthScanned = paymentRecords.filter((item) => item.createdAt >= thisMonthStart).length;
+  const previousMonthScanned = paymentRecords.filter(
+    (item) => item.createdAt >= previousMonthStart && item.createdAt < thisMonthStart,
+  ).length;
   const monthOverMonth =
     previousMonthScanned === 0
       ? (thisMonthScanned > 0 ? 100 : 0)
@@ -185,11 +302,86 @@ export default function Settings() {
   );
   const consistencyRate = Math.round((thisMonthDayKeyCount / Math.max(daysElapsedThisMonth, 1)) * 100);
   const averageScansPerActiveDay = receiptsScanned > 0 ? (receiptsScanned / Math.max(dayKeys.length, 1)).toFixed(1) : "0.0";
-  const milestones = [
-    { label: "7-day streak", done: currentStreak >= 7 || bestStreak >= 7 },
-    { label: "30 active days", done: daysActive >= 30 },
-    { label: "100 scans", done: receiptsScanned >= 100 },
-  ];
+  const thisMonthSpendCents = paymentRecords
+    .filter((item) => item.createdAt >= thisMonthStart)
+    .reduce((total, item) => total + item.sumCents, 0);
+  const previousMonthSpendCents = paymentRecords
+    .filter((item) => item.createdAt >= previousMonthStart && item.createdAt < thisMonthStart)
+    .reduce((total, item) => total + item.sumCents, 0);
+  const spendChangePercent =
+    previousMonthSpendCents === 0
+      ? (thisMonthSpendCents > 0 ? 100 : 0)
+      : Math.round(((thisMonthSpendCents - previousMonthSpendCents) / previousMonthSpendCents) * 100);
+  const spendDifferenceCents = thisMonthSpendCents - previousMonthSpendCents;
+  const spendChangePrefix = spendChangePercent >= 0 ? "+" : "";
+  const averageTicketCents = thisMonthScanned > 0 ? Math.round(thisMonthSpendCents / thisMonthScanned) : 0;
+  const daysInThisMonth = new Date(thisMonthStart.getFullYear(), thisMonthStart.getMonth() + 1, 0).getDate();
+  const projectedMonthSpendCents = Math.round((thisMonthSpendCents / Math.max(daysElapsedThisMonth, 1)) * daysInThisMonth);
+  const noScanDaysThisMonth = Math.max(daysElapsedThisMonth - thisMonthDayKeyCount, 0);
+  const thisMonthDayTotals = paymentRecords.reduce<Map<string, number>>((map, item) => {
+    if (item.createdAt < thisMonthStart) return map;
+    const key = toDayKey(item.createdAt);
+    if (!key) return map;
+    map.set(key, (map.get(key) ?? 0) + item.sumCents);
+    return map;
+  }, new Map<string, number>());
+  let highestSpendDayKey: string | null = null;
+  let highestSpendDayCents = 0;
+  thisMonthDayTotals.forEach((total, key) => {
+    if (total > highestSpendDayCents) {
+      highestSpendDayCents = total;
+      highestSpendDayKey = key;
+    }
+  });
+  const highestSpendDayLabel = highestSpendDayKey
+    ? (() => {
+        const [year, month, day] = highestSpendDayKey.split("-").map(Number);
+        return new Date(year, month - 1, day).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      })()
+    : "N/A";
+  const weekdayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const weekdayCounts = [0, 0, 0, 0, 0, 0, 0];
+  paymentRecords.forEach((item) => {
+    if (item.createdAt >= thisMonthStart) {
+      weekdayCounts[item.createdAt.getDay()] += 1;
+    }
+  });
+  let mostActiveWeekday = "N/A";
+  let mostActiveWeekdayCount = 0;
+  weekdayCounts.forEach((count, index) => {
+    if (count > mostActiveWeekdayCount) {
+      mostActiveWeekdayCount = count;
+      mostActiveWeekday = weekdayNames[index];
+    }
+  });
+  const monthlyCandles = Array.from({ length: 6 }, (_, idx) => {
+    const offset = 5 - idx;
+    const monthStart = new Date(thisMonthStart.getFullYear(), thisMonthStart.getMonth() - offset, 1);
+    const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
+    const monthDayTotals = paymentRecords.reduce<Map<string, number>>((map, item) => {
+      if (item.createdAt < monthStart || item.createdAt >= monthEnd) return map;
+      const key = toDayKey(item.createdAt);
+      if (!key) return map;
+      map.set(key, (map.get(key) ?? 0) + item.sumCents);
+      return map;
+    }, new Map<string, number>());
+    const sortedDailyTotals = Array.from(monthDayTotals.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([, total]) => total);
+    const open = sortedDailyTotals[0] ?? 0;
+    const close = sortedDailyTotals[sortedDailyTotals.length - 1] ?? 0;
+    const high = sortedDailyTotals.length > 0 ? Math.max(...sortedDailyTotals) : 0;
+    const low = sortedDailyTotals.length > 0 ? Math.min(...sortedDailyTotals) : 0;
+    return {
+      key: `${monthStart.getFullYear()}-${monthStart.getMonth() + 1}`,
+      label: monthStart.toLocaleDateString("en-US", { month: "short" }),
+      open,
+      close,
+      high,
+      low,
+    };
+  });
+  const candleChartMax = Math.max(...monthlyCandles.map((item) => item.high), 1);
   const languages = [
     { code: 'en', name: 'English' },
     { code: 'es', name: 'Spanish' },
@@ -227,6 +419,30 @@ export default function Settings() {
       Animated.timing(prefsAnim, { toValue: 1, duration: 280, useNativeDriver: true }),
     ]).start();
   }, [heroAnim, upgradeAnim, prefsAnim]);
+  useEffect(() => {
+    const loops = pulseParticleAnims.map((value, index) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(index * 180),
+          Animated.timing(value, {
+            toValue: 1,
+            duration: 1700 + index * 130,
+            useNativeDriver: true,
+          }),
+          Animated.timing(value, {
+            toValue: 0,
+            duration: 1700 + index * 120,
+            useNativeDriver: true,
+          }),
+        ]),
+      ),
+    );
+
+    loops.forEach((loop) => loop.start());
+    return () => {
+      loops.forEach((loop) => loop.stop());
+    };
+  }, [pulseParticleAnims]);
   const triggerSelectionHaptic = () => {
     void Haptics.selectionAsync().catch(() => undefined);
   };
@@ -474,6 +690,7 @@ export default function Settings() {
     {
       key: "base-currency",
       label: "Base Currency",
+      value: baseCurrencyBadge,
       icon: DollarSign,
       color: "#FF8544",
       onPress: () =>
@@ -484,6 +701,7 @@ export default function Settings() {
     {
       key: "language",
       label: "Language",
+      value: languageBadge,
       icon: Languages,
       color: "#7E57FF",
       onPress: () =>
@@ -495,7 +713,10 @@ export default function Settings() {
 
   return (
     <Pressable style={styles.screen} onPress={Keyboard.dismiss}>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: listBottomPadding }]}
+        showsVerticalScrollIndicator={false}
+      >
         <Text style={styles.pageTitle}>Settings</Text>
 
         <Animated.View
@@ -596,29 +817,66 @@ export default function Settings() {
               </Pressable>
             </View>
 
-            <View style={styles.milestoneRow}>
-              {milestones.map((milestone) => (
-                <Pressable
-                  key={milestone.label}
-                  onPress={() => openProgressModal(`milestone:${milestone.label}`)}
-                  style={[styles.milestonePill, milestone.done ? styles.milestonePillDone : null]}
-                >
-                  <Text style={[styles.milestoneText, milestone.done ? styles.milestoneTextDone : null]}>
-                    {milestone.label}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-
             <Pressable
               style={({ pressed }) => [styles.insightCard, pressed ? styles.progressPressed : null]}
               onPress={() => openProgressModal("insight")}
             >
-              <Text style={styles.insightTitle}>Monthly Insight</Text>
-              <Text style={styles.insightText}>
-                You scanned {thisMonthScanned} receipts this month ({insightPrefix}
-                {monthOverMonth}% vs last month).
-              </Text>
+              <View pointerEvents="none" style={styles.insightParticlesLayer}>
+                {MONTHLY_PULSE_PARTICLES.map((particle, index) => {
+                  const anim = pulseParticleAnims[index];
+                  const translateY = anim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, -particle.drift],
+                  });
+                  const scale = anim.interpolate({
+                    inputRange: [0, 0.5, 1],
+                    outputRange: [0.82, 1.08, 0.9],
+                  });
+                  const opacity = anim.interpolate({
+                    inputRange: [0, 0.5, 1],
+                    outputRange: [0.06, particle.peakOpacity, 0.1],
+                  });
+
+                  return (
+                    <Animated.View
+                      key={`pulse-particle-${index}`}
+                      style={[
+                        styles.insightParticle,
+                        {
+                          width: particle.size,
+                          height: particle.size,
+                          left: particle.left,
+                          top: particle.top,
+                          opacity,
+                          transform: [{ translateY }, { scale }],
+                        },
+                      ]}
+                    />
+                  );
+                })}
+              </View>
+              <View style={styles.insightContentWrap}>
+                <View style={styles.insightHeaderRow}>
+                  <View style={styles.insightTitleWrap}>
+                    <ChartColumnStacked size={14} color="#57A7FD" />
+                    <Text style={styles.insightTitle}>Monthly Pulse</Text>
+                  </View>
+                  <ChevronRight size={14} color="#8FBFFF" />
+                </View>
+                <View style={styles.insightMetricsRow}>
+                  <View style={styles.insightMetricChip}>
+                    <Text style={styles.insightMetricLabel}>Scans</Text>
+                    <Text style={styles.insightMetricValue}>{thisMonthScanned}</Text>
+                  </View>
+                  <View style={styles.insightMetricChip}>
+                    <Text style={styles.insightMetricLabel}>Consistency</Text>
+                    <Text style={styles.insightMetricValue}>{consistencyRate}%</Text>
+                  </View>
+                </View>
+                <Text style={styles.insightTrendText}>
+                  {monthOverMonth >= 0 ? "Up" : "Down"} {Math.abs(monthOverMonth)}% vs last month
+                </Text>
+              </View>
             </Pressable>
           </View>
         </Animated.View>
@@ -642,7 +900,7 @@ export default function Settings() {
           }}
         >
           <View style={styles.upgradeIconWrap}>
-            <Diamond size={17} color="#F8D26A" strokeWidth={2.5} />
+            <Diamond size={17} color="#57A7FD" strokeWidth={2.5} />
           </View>
           <View style={styles.upgradeContent}>
             <Text style={styles.upgradeTitle}>Upgrade To Pro</Text>
@@ -687,14 +945,17 @@ export default function Settings() {
                   <IconComp size={20} color={option.color} strokeWidth={2.8} />
                 </View>
                 <Text style={styles.optionText}>{option.label}</Text>
+                {"value" in option && option.value ? (
+                  <View style={styles.optionValuePill}>
+                    <Text style={styles.optionValueText}>{option.value}</Text>
+                  </View>
+                ) : null}
                 <ChevronRight size={18} style={styles.optionChevron} />
               </Pressable>
             );
           })}
         </View>
         </Animated.View>
-
-        <View style={{ height: 50 }} />
       </ScrollView>
       <Modal visible={showProPlans} transparent animationType="fade" onRequestClose={() => setShowProPlans(false)}>
         <Pressable style={styles.proOverlay} onPress={() => setShowProPlans(false)}>
@@ -838,22 +1099,134 @@ export default function Settings() {
                         ? "Days Active"
                         : progressModal === "scanned"
                           ? "Receipts Scanned"
-                          : progressModal === "best"
-                            ? "Best Streak"
-                            : "Milestone Details"}
+                          : "Best Streak"}
                   </Text>
                   <Pressable onPress={closeProgressModal}>
                     <X size={18} color="#111827" />
                   </Pressable>
                 </View>
                 {progressModal === "insight" ? (
-                  <View style={styles.detailStack}>
-                    <View style={styles.detailRow}><Text style={styles.detailKey}>This month scans</Text><Text style={styles.detailValue}>{thisMonthScanned}</Text></View>
-                    <View style={styles.detailRow}><Text style={styles.detailKey}>Last month scans</Text><Text style={styles.detailValue}>{previousMonthScanned}</Text></View>
-                    <View style={styles.detailRow}><Text style={styles.detailKey}>Month over month</Text><Text style={styles.detailValue}>{insightPrefix}{monthOverMonth}%</Text></View>
-                    <View style={styles.detailRow}><Text style={styles.detailKey}>Consistency</Text><Text style={styles.detailValue}>{consistencyRate}%</Text></View>
-                    <View style={styles.detailRow}><Text style={styles.detailKey}>Avg scans / active day</Text><Text style={styles.detailValue}>{averageScansPerActiveDay}</Text></View>
-                  </View>
+                  <ScrollView
+                    style={styles.insightScroll}
+                    contentContainerStyle={styles.insightScrollContent}
+                    showsVerticalScrollIndicator={false}
+                  >
+                    <View style={styles.insightSummaryCard}>
+                      <View>
+                        <Text style={styles.insightSummaryLabel}>{thisMonthTitle}</Text>
+                        <Text style={styles.insightSummaryValue}>{formatCurrency(thisMonthSpendCents)}</Text>
+                        <Text style={styles.insightSummaryHint}>
+                          {thisMonthScanned} receipts scanned this month
+                        </Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.insightChangeBadge,
+                          spendDifferenceCents >= 0 ? styles.insightChangeBadgeNegative : styles.insightChangeBadgePositive,
+                        ]}
+                      >
+                        {spendDifferenceCents >= 0 ? (
+                          <TrendingUp size={14} color="#DC2626" />
+                        ) : (
+                          <TrendingDown size={14} color="#059669" />
+                        )}
+                        <Text
+                          style={[
+                            styles.insightChangeBadgeText,
+                            spendDifferenceCents >= 0 ? styles.insightChangeBadgeTextNegative : styles.insightChangeBadgeTextPositive,
+                          ]}
+                        >
+                          {spendChangePrefix}
+                          {spendChangePercent}%
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.insightStatGrid}>
+                      <View style={styles.insightStatCard}>
+                        <Text style={styles.insightStatLabel}>Last Month</Text>
+                        <Text style={styles.insightStatValue}>{formatCurrency(previousMonthSpendCents)}</Text>
+                      </View>
+                      <View style={styles.insightStatCard}>
+                        <Text style={styles.insightStatLabel}>Projected</Text>
+                        <Text style={styles.insightStatValue}>{formatCurrency(projectedMonthSpendCents)}</Text>
+                      </View>
+                      <View style={styles.insightStatCard}>
+                        <Text style={styles.insightStatLabel}>Avg Ticket</Text>
+                        <Text style={styles.insightStatValue}>{formatCurrency(averageTicketCents)}</Text>
+                      </View>
+                      <View style={styles.insightStatCard}>
+                        <Text style={styles.insightStatLabel}>No-Scan Days</Text>
+                        <Text style={styles.insightStatValue}>{noScanDaysThisMonth}</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.candleCard}>
+                      <View style={styles.candleHeaderRow}>
+                        <Text style={styles.candleTitle}>Spend Candles</Text>
+                        <Text style={styles.candleSubtitle}>Last 6 Months</Text>
+                      </View>
+                      <View style={styles.candleChartRow}>
+                        {monthlyCandles.map((month) => {
+                          const chartHeight = 90;
+                          const wickTop = chartHeight - (month.high / candleChartMax) * chartHeight;
+                          const wickHeight = Math.max(((month.high - month.low) / candleChartMax) * chartHeight, 2);
+                          const bodyTop = chartHeight - (Math.max(month.open, month.close) / candleChartMax) * chartHeight;
+                          const bodyHeight = Math.max((Math.abs(month.close - month.open) / candleChartMax) * chartHeight, 3);
+                          const isHigherClose = month.close > month.open;
+                          const isLowerClose = month.close < month.open;
+                          return (
+                            <View key={month.key} style={styles.candleColumn}>
+                              <View style={styles.candleTrack}>
+                                <View
+                                  style={[
+                                    styles.candleWick,
+                                    {
+                                      top: wickTop,
+                                      height: wickHeight,
+                                    },
+                                  ]}
+                                />
+                                <View
+                                  style={[
+                                    styles.candleBody,
+                                    isHigherClose ? styles.candleBodyHigher : null,
+                                    isLowerClose ? styles.candleBodyLower : null,
+                                    {
+                                      top: bodyTop,
+                                      height: bodyHeight,
+                                    },
+                                  ]}
+                                />
+                              </View>
+                              <Text style={styles.candleMonthLabel}>{month.label}</Text>
+                            </View>
+                          );
+                        })}
+                      </View>
+                      <View style={styles.candleLegendRow}>
+                        <View style={styles.candleLegendItem}>
+                          <View style={[styles.candleLegendDot, styles.candleBodyHigher]} />
+                          <Text style={styles.candleLegendText}>Higher close</Text>
+                        </View>
+                        <View style={styles.candleLegendItem}>
+                          <View style={[styles.candleLegendDot, styles.candleBodyLower]} />
+                          <Text style={styles.candleLegendText}>Lower close</Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    <View style={styles.detailStack}>
+                      <View style={styles.detailRow}><Text style={styles.detailKey}>This month scans</Text><Text style={styles.detailValue}>{thisMonthScanned}</Text></View>
+                      <View style={styles.detailRow}><Text style={styles.detailKey}>Last month scans</Text><Text style={styles.detailValue}>{previousMonthScanned}</Text></View>
+                      <View style={styles.detailRow}><Text style={styles.detailKey}>Scan growth</Text><Text style={styles.detailValue}>{insightPrefix}{monthOverMonth}%</Text></View>
+                      <View style={styles.detailRow}><Text style={styles.detailKey}>Spend delta</Text><Text style={styles.detailValue}>{spendDifferenceCents >= 0 ? "+" : "-"}{formatCurrency(Math.abs(spendDifferenceCents))}</Text></View>
+                      <View style={styles.detailRow}><Text style={styles.detailKey}>Consistency</Text><Text style={styles.detailValue}>{consistencyRate}%</Text></View>
+                      <View style={styles.detailRow}><Text style={styles.detailKey}>Avg scans / active day</Text><Text style={styles.detailValue}>{averageScansPerActiveDay}</Text></View>
+                      <View style={styles.detailRow}><Text style={styles.detailKey}>Highest spend day</Text><Text style={styles.detailValue}>{highestSpendDayLabel} ({formatCurrency(highestSpendDayCents)})</Text></View>
+                      <View style={styles.detailRow}><Text style={styles.detailKey}>Most active weekday</Text><Text style={styles.detailValue}>{mostActiveWeekdayCount > 0 ? `${mostActiveWeekday} (${mostActiveWeekdayCount})` : "N/A"}</Text></View>
+                    </View>
+                  </ScrollView>
                 ) : progressModal === "days" ? (
                   <Text style={styles.progressBodyText}>
                     You have been active for {daysActive} days since registration. Active days are counted from your sign-up date.
@@ -868,9 +1241,7 @@ export default function Settings() {
                   </Text>
                 ) : (
                   <Text style={styles.progressBodyText}>
-                    {progressModal?.startsWith("milestone:")
-                      ? `${progressModal.replace("milestone:", "")} milestone tracks your long-term consistency.`
-                      : "Track your milestones to unlock higher consistency levels."}
+                    Track your scanning habits to unlock better insights over time.
                   </Text>
                 )}
               </>
@@ -900,7 +1271,7 @@ const styles = StyleSheet.create({
   },
   profileCard: {
     width: "100%",
-    backgroundColor: "#0F1722",
+    backgroundColor: "#000000",
     borderRadius: 18,
     paddingHorizontal: 14,
     paddingTop: 14,
@@ -1015,51 +1386,73 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: "Inter_400Regular",
   },
-  milestoneRow: {
-    marginTop: 12,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  milestonePill: {
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.14)",
-  },
-  milestonePillDone: {
-    backgroundColor: "rgba(0,221,183,0.18)",
-    borderColor: "rgba(0,221,183,0.55)",
-  },
-  milestoneText: {
-    color: "#C4C7CF",
-    fontSize: 11,
-    fontFamily: "Inter_500Medium",
-  },
-  milestoneTextDone: {
-    color: "#B6FFF1",
-  },
   insightCard: {
     marginTop: 12,
-    borderRadius: 12,
-    backgroundColor: "#101824",
+    borderRadius: 14,
+    backgroundColor: "#0C121B",
     borderWidth: 1,
-    borderColor: "rgba(87,167,253,0.35)",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderColor: "rgba(87,167,253,0.32)",
+    paddingHorizontal: 13,
+    paddingVertical: 12,
+    overflow: "hidden",
+    position: "relative",
+  },
+  insightParticlesLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  insightParticle: {
+    position: "absolute",
+    borderRadius: 999,
+    backgroundColor: "#57A7FD",
+  },
+  insightContentWrap: {
+    zIndex: 1,
+  },
+  insightHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  insightTitleWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
   },
   insightTitle: {
     color: "#57A7FD",
-    fontSize: 12,
+    fontSize: 13,
     fontFamily: "Inter_600SemiBold",
   },
-  insightText: {
+  insightMetricsRow: {
+    marginTop: 10,
+    flexDirection: "row",
+    gap: 8,
+  },
+  insightMetricChip: {
+    flex: 1,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    borderRadius: 11,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  insightMetricLabel: {
+    color: "#AAB8CC",
+    fontSize: 10,
+    fontFamily: "Inter_500Medium",
+  },
+  insightMetricValue: {
     marginTop: 4,
-    color: "#E5E7EB",
-    fontSize: 12,
-    lineHeight: 18,
+    color: "#FFFFFF",
+    fontSize: 17,
+    fontFamily: "Inter_700Bold",
+  },
+  insightTrendText: {
+    marginTop: 10,
+    color: "#DCE8F8",
+    fontSize: 11,
+    lineHeight: 16,
     fontFamily: "Inter_400Regular",
   },
   nameInput: {
@@ -1073,10 +1466,10 @@ const styles = StyleSheet.create({
   },
   upgradeCard: {
     marginTop: 10,
-    backgroundColor: "#0B1220",
+    backgroundColor: "#000000",
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(248,210,106,0.35)",
+    borderColor: "rgba(87,167,253,0.34)",
     marginBottom: 14,
     flexDirection: "row",
     paddingHorizontal: 14,
@@ -1096,9 +1489,9 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 10,
-    backgroundColor: "rgba(248,210,106,0.15)",
+    backgroundColor: "rgba(87,167,253,0.15)",
     borderWidth: 1,
-    borderColor: "rgba(248,210,106,0.4)",
+    borderColor: "rgba(87,167,253,0.42)",
     alignItems: "center",
     justifyContent: "center",
     marginRight: 10,
@@ -1121,12 +1514,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9,
     paddingVertical: 5,
     borderRadius: 999,
-    backgroundColor: "rgba(248,210,106,0.16)",
+    backgroundColor: "rgba(87,167,253,0.16)",
     borderWidth: 1,
-    borderColor: "rgba(248,210,106,0.45)",
+    borderColor: "rgba(87,167,253,0.45)",
   },
   upgradePillText: {
-    color: "#F8D26A",
+    color: "#57A7FD",
     fontSize: 10,
     letterSpacing: 0.5,
     fontFamily: "Inter_700Bold",
@@ -1180,8 +1573,22 @@ optionCard: {
     fontSize: 15,
     fontFamily: "Inter_500Medium",
   },
-  optionChevron: {
+  optionValuePill: {
     marginLeft: "auto",
+    marginRight: 8,
+    backgroundColor: "#F3F4F6",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  optionValueText: {
+    color: "#111827",
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+  },
+  optionChevron: {
     opacity: 0.8,
   },
   proOverlay: {
@@ -1430,8 +1837,184 @@ optionCard: {
     fontSize: 12,
     fontFamily: "Inter_500Medium",
   },
-  detailStack: {
+  insightScroll: {
+    maxHeight: 520,
+    marginTop: 4,
+  },
+  insightScrollContent: {
+    paddingBottom: 4,
+    gap: 10,
+  },
+  insightSummaryCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#DBEAFE",
+    backgroundColor: "#EFF6FF",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  insightSummaryLabel: {
+    color: "#1E3A8A",
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+  },
+  insightSummaryValue: {
+    marginTop: 3,
+    color: "#0B1220",
+    fontSize: 24,
+    fontFamily: "Inter_700Bold",
+  },
+  insightSummaryHint: {
+    marginTop: 2,
+    color: "#475569",
+    fontSize: 12,
+    fontFamily: "Inter_500Medium",
+  },
+  insightChangeBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderWidth: 1,
+  },
+  insightChangeBadgeNegative: {
+    backgroundColor: "#FEE2E2",
+    borderColor: "#FECACA",
+  },
+  insightChangeBadgePositive: {
+    backgroundColor: "#DCFCE7",
+    borderColor: "#BBF7D0",
+  },
+  insightChangeBadgeText: {
+    fontSize: 12,
+    fontFamily: "Inter_700Bold",
+  },
+  insightChangeBadgeTextNegative: {
+    color: "#B91C1C",
+  },
+  insightChangeBadgeTextPositive: {
+    color: "#047857",
+  },
+  insightStatGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  insightStatCard: {
+    flexBasis: "48%",
+    flexGrow: 1,
+    borderRadius: 12,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
+  insightStatLabel: {
+    color: "#64748B",
+    fontSize: 11,
+    fontFamily: "Inter_500Medium",
+  },
+  insightStatValue: {
+    marginTop: 4,
+    color: "#0F172A",
+    fontSize: 14,
+    fontFamily: "Inter_700Bold",
+  },
+  candleCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    backgroundColor: "#F8FAFC",
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
+  candleHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  candleTitle: {
+    color: "#0F172A",
+    fontSize: 13,
+    fontFamily: "Inter_700Bold",
+  },
+  candleSubtitle: {
+    color: "#64748B",
+    fontSize: 11,
+    fontFamily: "Inter_500Medium",
+  },
+  candleChartRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    height: 112,
+    paddingHorizontal: 2,
+  },
+  candleColumn: {
+    flex: 1,
+    alignItems: "center",
+  },
+  candleTrack: {
+    width: "100%",
+    height: 92,
+    position: "relative",
+    alignItems: "center",
+    justifyContent: "flex-end",
+  },
+  candleWick: {
+    position: "absolute",
+    width: 2,
+    borderRadius: 999,
+    backgroundColor: "#94A3B8",
+  },
+  candleBody: {
+    position: "absolute",
+    width: 10,
+    borderRadius: 4,
+    backgroundColor: "#334155",
+  },
+  candleBodyHigher: {
+    backgroundColor: "#EF4444",
+  },
+  candleBodyLower: {
+    backgroundColor: "#10B981",
+  },
+  candleMonthLabel: {
+    marginTop: 4,
+    color: "#64748B",
+    fontSize: 10,
+    fontFamily: "Inter_600SemiBold",
+  },
+  candleLegendRow: {
     marginTop: 8,
+    flexDirection: "row",
+    gap: 14,
+  },
+  candleLegendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  candleLegendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 3,
+    marginRight: 5,
+  },
+  candleLegendText: {
+    color: "#4B5563",
+    fontSize: 11,
+    fontFamily: "Inter_500Medium",
+  },
+  detailStack: {
+    marginTop: 2,
     gap: 8,
   },
   detailRow: {

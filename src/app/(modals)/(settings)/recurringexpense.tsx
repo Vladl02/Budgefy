@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SlidingSheet } from "@/src/components/SlidingSheet";
-import { Plus, CreditCard, ChevronLeft, Bell, Trash2, Search, Check, ChevronRight, BellRing } from 'lucide-react-native';
+import { Plus, CreditCard, ChevronLeft, Bell, Trash2, Search, Check, ChevronRight, BellRing, CalendarClock, Sparkles } from 'lucide-react-native';
 
 // ---------------------------------------------------------------------------
 // 🚨 CRASH FIX: MOCKING NOTIFICATIONS 🚨
@@ -97,6 +97,21 @@ const INITIAL_PAYMENTS: Payment[] = [
 const ICON_PALETTE = [
   "#57A7FD", "#FE5A59", "#FFC83C", "#00DDB7", "#7E57FF", "#FF8544", "#F472B6",
 ];
+const TIMELINE_MIN_GAP_PERCENT = 8;
+const TIMELINE_MAX_LANES = 3;
+
+const OPTIONAL_SUBSCRIPTION_KEYWORDS = [
+  "netflix",
+  "spotify",
+  "hbo",
+  "disney",
+  "prime",
+  "youtube",
+  "apple",
+  "icloud",
+  "adobe",
+  "gym",
+];
 
 export default function RecurringExpense() {
   const router = useRouter();
@@ -116,6 +131,8 @@ export default function RecurringExpense() {
   
   const [reminderOffset, setReminderOffset] = useState(0); 
   const [exchangeRates, setExchangeRates] = useState<Record<string, number>>(FALLBACK_RATES);
+  const [reviewingSuggestionIds, setReviewingSuggestionIds] = useState<string[]>([]);
+  const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState<string[]>([]);
 
   // --- EFFECTS ---
 
@@ -244,6 +261,113 @@ export default function RecurringExpense() {
       return acc + (curr.amount / safeRate);
     }, 0);
   }, [payments, exchangeRates]);
+  const annualSpendRON = useMemo(() => totalMonthlyRON * 12, [totalMonthlyRON]);
+  const timelineMonthLabel = useMemo(
+    () => new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" }),
+    [],
+  );
+
+  const chargeProjections = useMemo(() => {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const currentMonthDays = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const nextMonthDays = new Date(now.getFullYear(), now.getMonth() + 2, 0).getDate();
+
+    return payments.map((payment) => {
+      const rate = exchangeRates[payment.currency] || 1;
+      const safeRate = rate === 0 ? 1 : rate;
+      const ronAmount = payment.amount / safeRate;
+      const rawDay = Number.parseInt(payment.day, 10);
+      const billingDay = Number.isFinite(rawDay) && rawDay > 0 ? rawDay : 1;
+      const dueThisMonth = Math.min(billingDay, currentMonthDays);
+
+      let nextDate = new Date(now.getFullYear(), now.getMonth(), dueThisMonth);
+      let isCurrentMonth = true;
+
+      if (dueThisMonth < now.getDate()) {
+        const dueNextMonth = Math.min(billingDay, nextMonthDays);
+        nextDate = new Date(now.getFullYear(), now.getMonth() + 1, dueNextMonth);
+        isCurrentMonth = false;
+      }
+
+      const daysUntil = Math.max(0, Math.round((nextDate.getTime() - todayStart.getTime()) / 86400000));
+      const rawMarkerPercent = isCurrentMonth
+        ? (currentMonthDays <= 1 ? 0 : ((dueThisMonth - 1) / (currentMonthDays - 1)) * 100)
+        : 100;
+      const markerPercent = Math.max(2, Math.min(98, rawMarkerPercent));
+
+      return {
+        ...payment,
+        ronAmount,
+        nextDate,
+        daysUntil,
+        markerPercent,
+        dueThisMonth,
+        isCurrentMonth,
+      };
+    });
+  }, [payments, exchangeRates]);
+
+  const nextCharge = useMemo(() => {
+    if (chargeProjections.length === 0) return null;
+    return [...chargeProjections].sort((a, b) => a.daysUntil - b.daysUntil || b.ronAmount - a.ronAmount)[0];
+  }, [chargeProjections]);
+
+  const timelineCharges = useMemo(() => {
+    const currentMonthUpcoming = chargeProjections
+      .filter((item) => item.isCurrentMonth)
+      .sort((a, b) => a.dueThisMonth - b.dueThisMonth);
+    if (currentMonthUpcoming.length > 0) return currentMonthUpcoming;
+    return nextCharge ? [nextCharge] : [];
+  }, [chargeProjections, nextCharge]);
+  const timelineMarkers = useMemo(() => {
+    const laneLastPercent = Array.from({ length: TIMELINE_MAX_LANES }, () => -999);
+
+    return timelineCharges.map((charge) => {
+      let lane = laneLastPercent.findIndex(
+        (lastPercent) => charge.markerPercent - lastPercent >= TIMELINE_MIN_GAP_PERCENT,
+      );
+
+      if (lane === -1) {
+        lane = laneLastPercent.reduce((bestLane, lastPercent, index) => {
+          if (lastPercent < laneLastPercent[bestLane]) return index;
+          return bestLane;
+        }, 0);
+      }
+
+      laneLastPercent[lane] = charge.markerPercent;
+
+      return {
+        ...charge,
+        lane,
+      };
+    });
+  }, [timelineCharges]);
+  const timelineLegendItems = useMemo(() => timelineMarkers.slice(0, 3), [timelineMarkers]);
+  const timelineLegendExtra = Math.max(timelineMarkers.length - timelineLegendItems.length, 0);
+
+  const smartSuggestion = useMemo(() => {
+    if (chargeProjections.length === 0) return null;
+    const optional = chargeProjections.filter((item) =>
+      OPTIONAL_SUBSCRIPTION_KEYWORDS.some((keyword) => item.name.toLowerCase().includes(keyword)),
+    );
+    const candidatePool = optional.length > 0 ? optional : chargeProjections;
+    const candidate = [...candidatePool].sort((a, b) => b.ronAmount - a.ronAmount)[0];
+    if (!candidate) return null;
+
+    return {
+      id: candidate.id,
+      name: candidate.name,
+      potentialSavingsRON: Math.round(candidate.ronAmount),
+      sharePercent: totalMonthlyRON > 0 ? Math.round((candidate.ronAmount / totalMonthlyRON) * 100) : 0,
+    };
+  }, [chargeProjections, totalMonthlyRON]);
+
+  const activeSuggestion = useMemo(() => {
+    if (!smartSuggestion) return null;
+    if (dismissedSuggestionIds.includes(smartSuggestion.id)) return null;
+    return smartSuggestion;
+  }, [smartSuggestion, dismissedSuggestionIds]);
 
   // --- RENDER HELPERS ---
 
@@ -326,9 +450,104 @@ export default function RecurringExpense() {
                           <Text style={styles.summaryAmount}>{totalMonthlyRON.toFixed(2)}</Text>
                           <Text style={styles.summaryCurrency}>RON</Text>
                         </View>
+                        <Text style={styles.summaryAnnual}>≈ {annualSpendRON.toFixed(0)} RON per year</Text>
                       </View>
                       <Bell size={22} color="#1F1F1F" strokeWidth={2} />
                     </View>
+
+                    {nextCharge ? (
+                      <View style={styles.insightCard}>
+                        <View style={styles.insightRow}>
+                          <View style={styles.insightBadge}>
+                            <CalendarClock size={14} color="#111827" />
+                          </View>
+                          <Text style={styles.insightText}>
+                            Next payment in {nextCharge.daysUntil} day{nextCharge.daysUntil === 1 ? "" : "s"} — {nextCharge.name} ({nextCharge.ronAmount.toFixed(0)} RON)
+                          </Text>
+                        </View>
+                        <View style={styles.timelineHead}>
+                          <Text style={styles.timelineTitle}>Upcoming charges</Text>
+                          <Text style={styles.timelineMonth}>{timelineMonthLabel}</Text>
+                        </View>
+                        <View style={styles.timelineTrackWrap}>
+                          <View style={styles.timelineTrack} />
+                          <View style={styles.timelineMarkerLayer}>
+                            {timelineMarkers.map((charge) => (
+                              <View
+                                key={`timeline-${charge.id}`}
+                                style={[
+                                  styles.timelineMarkerWrap,
+                                  {
+                                    left: `${charge.markerPercent}%`,
+                                    top: 3 + charge.lane * 7,
+                                  },
+                                ]}
+                              >
+                                <View style={[styles.timelineMarker, { backgroundColor: charge.color }]} />
+                              </View>
+                            ))}
+                          </View>
+                        </View>
+                        <View style={styles.timelineLegend}>
+                          {timelineLegendItems.map((charge) => (
+                            <View key={`legend-${charge.id}`} style={styles.timelineLegendItem}>
+                              <View style={[styles.timelineLegendDot, { backgroundColor: charge.color }]} />
+                              <Text style={styles.timelineLegendText}>
+                                D{charge.nextDate.getDate()} {charge.name}
+                              </Text>
+                            </View>
+                          ))}
+                          {timelineLegendExtra > 0 ? (
+                            <Text style={styles.timelineMoreText}>+{timelineLegendExtra} more</Text>
+                          ) : null}
+                        </View>
+                      </View>
+                    ) : null}
+
+                    {activeSuggestion ? (
+                      <View style={styles.suggestionCard}>
+                        <View style={styles.suggestionTop}>
+                          <View style={styles.suggestionBadge}>
+                            <Sparkles size={14} color="#FFFFFF" />
+                          </View>
+                          <Text style={styles.suggestionEyebrow}>Smart Suggestion</Text>
+                        </View>
+                        <Text style={styles.suggestionText}>
+                          You haven&apos;t used {activeSuggestion.name} this month. Cancel to save {activeSuggestion.potentialSavingsRON} RON?
+                        </Text>
+                        <Text style={styles.suggestionMeta}>
+                          Potential savings: {activeSuggestion.potentialSavingsRON} RON / month ({activeSuggestion.sharePercent}% of recurring spend)
+                        </Text>
+                        {reviewingSuggestionIds.includes(activeSuggestion.id) ? (
+                          <View style={styles.reviewingPill}>
+                            <Text style={styles.reviewingPillText}>Marked as reviewing</Text>
+                          </View>
+                        ) : (
+                          <View style={styles.suggestionActions}>
+                            <Pressable
+                              style={styles.reviewBtn}
+                              onPress={() =>
+                                setReviewingSuggestionIds((prev) =>
+                                  prev.includes(activeSuggestion.id) ? prev : [...prev, activeSuggestion.id],
+                                )
+                              }
+                            >
+                              <Text style={styles.reviewBtnText}>Mark as reviewing</Text>
+                            </Pressable>
+                            <Pressable
+                              style={styles.dismissBtn}
+                              onPress={() =>
+                                setDismissedSuggestionIds((prev) =>
+                                  prev.includes(activeSuggestion.id) ? prev : [...prev, activeSuggestion.id],
+                                )
+                              }
+                            >
+                              <Text style={styles.dismissBtnText}>Dismiss</Text>
+                            </Pressable>
+                          </View>
+                        )}
+                      </View>
+                    ) : null}
 
                     <Text style={styles.sectionHeader}>Active Subscriptions</Text>
                     
@@ -468,6 +687,37 @@ const styles = StyleSheet.create({
   summaryLabel: { fontSize: 12, color: '#666', fontWeight: '700', textTransform: 'uppercase' },
   summaryAmount: { fontSize: 26, fontWeight: '800', color: '#1F1F1F', marginTop: 4 },
   summaryCurrency: { fontSize: 16, fontWeight: '600', color: '#999', marginBottom: 2 },
+  summaryAnnual: { marginTop: 4, fontSize: 12, fontWeight: '600', color: '#4B5563' },
+  insightCard: { marginTop: -10, marginBottom: 14, borderRadius: 14, borderWidth: 1, borderColor: '#E5E7EB', backgroundColor: '#F9FAFB', padding: 12 },
+  insightRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  insightBadge: { width: 24, height: 24, borderRadius: 8, backgroundColor: '#EEF2FF', borderWidth: 1, borderColor: '#D1D5DB', alignItems: 'center', justifyContent: 'center' },
+  insightText: { flex: 1, fontSize: 13, fontWeight: '700', color: '#111827' },
+  timelineHead: { marginTop: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  timelineTitle: { fontSize: 11, fontWeight: '700', color: '#4B5563', textTransform: 'uppercase' },
+  timelineMonth: { fontSize: 11, fontWeight: '600', color: '#6B7280' },
+  timelineTrackWrap: { marginTop: 10, height: 28, justifyContent: 'center', position: 'relative' },
+  timelineTrack: { height: 8, borderRadius: 999, backgroundColor: '#E5E7EB' },
+  timelineMarkerLayer: { ...StyleSheet.absoluteFillObject },
+  timelineMarkerWrap: { position: 'absolute', marginLeft: -6 },
+  timelineMarker: { width: 12, height: 12, borderRadius: 999, borderWidth: 2, borderColor: '#FFFFFF' },
+  timelineLegend: { marginTop: 10, flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  timelineLegendItem: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
+  timelineLegendDot: { width: 6, height: 6, borderRadius: 999 },
+  timelineLegendText: { fontSize: 11, fontWeight: '600', color: '#374151' },
+  timelineMoreText: { alignSelf: 'center', fontSize: 11, fontWeight: '700', color: '#6B7280' },
+  suggestionCard: { marginBottom: 16, borderRadius: 14, borderWidth: 1, borderColor: '#E5E7EB', backgroundColor: '#FFFFFF', padding: 12 },
+  suggestionTop: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  suggestionBadge: { width: 22, height: 22, borderRadius: 7, backgroundColor: '#111827', alignItems: 'center', justifyContent: 'center' },
+  suggestionEyebrow: { fontSize: 11, fontWeight: '800', color: '#111827', textTransform: 'uppercase', letterSpacing: 0.5 },
+  suggestionText: { marginTop: 8, fontSize: 14, fontWeight: '700', color: '#111827', lineHeight: 20 },
+  suggestionMeta: { marginTop: 6, fontSize: 12, color: '#6B7280', fontWeight: '500' },
+  suggestionActions: { marginTop: 10, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  reviewBtn: { backgroundColor: '#111827', borderRadius: 10, paddingVertical: 9, paddingHorizontal: 12 },
+  reviewBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
+  dismissBtn: { borderRadius: 10, borderWidth: 1, borderColor: '#D1D5DB', paddingVertical: 9, paddingHorizontal: 12, backgroundColor: '#FFFFFF' },
+  dismissBtnText: { color: '#374151', fontSize: 12, fontWeight: '700' },
+  reviewingPill: { marginTop: 10, alignSelf: 'flex-start', borderRadius: 999, backgroundColor: '#ECFDF3', borderWidth: 1, borderColor: '#A7F3D0', paddingHorizontal: 10, paddingVertical: 6 },
+  reviewingPillText: { color: '#047857', fontSize: 12, fontWeight: '700' },
   sectionHeader: { fontSize: 15, fontWeight: '700', color: '#1F1F1F', marginBottom: 12 },
   paymentItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F2F2F2' },
   iconContainer: { width: 42, height: 42, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 14 },

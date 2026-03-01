@@ -1,7 +1,13 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { SlidingSheet } from "@/src/components/SlidingSheet"; // Adjust path as needed
+import { useSQLiteContext } from "expo-sqlite";
+import {
+  DEFAULT_BASE_CURRENCY,
+  getBaseCurrencyPreference,
+  setBaseCurrencyPreference,
+} from "@/src/utils/preferences";
 
 const CURRENCY_OPTIONS = [
   { code: "RON", name: "Romanian Leu" },
@@ -14,9 +20,54 @@ const CURRENCY_OPTIONS = [
   { code: "CHF", name: "Swiss Franc" },
 ];
 
+const CURRENCY_REGION_MAP: Record<string, string> = {
+  USD: "US",
+  EUR: "EU",
+  GBP: "GB",
+  JPY: "JP",
+  CAD: "CA",
+  AUD: "AU",
+  CHF: "CH",
+  RON: "RO",
+};
+
+const toFlagEmoji = (regionCode: string): string =>
+  String.fromCodePoint(
+    ...regionCode
+      .toUpperCase()
+      .split("")
+      .map((char) => 127397 + char.charCodeAt(0)),
+  );
+
+const currencyFlag = (currencyCode: string): string => {
+  const regionCode = CURRENCY_REGION_MAP[currencyCode];
+  if (!regionCode) return "🏳️";
+  return toFlagEmoji(regionCode);
+};
+
 export default function LanguageScreen() {
   const router = useRouter();
-  const [selectedCurrency, setSelectedCurrency] = useState("USD");
+  const dbExpo = useSQLiteContext();
+  const [selectedCurrency, setSelectedCurrency] = useState(DEFAULT_BASE_CURRENCY);
+
+  useEffect(() => {
+    let isActive = true;
+    const loadCurrentCurrency = async () => {
+      try {
+        const storedCurrency = await getBaseCurrencyPreference(dbExpo);
+        if (isActive) {
+          setSelectedCurrency(storedCurrency.toUpperCase());
+        }
+      } catch (error) {
+        console.error("Failed to load base currency preference", error);
+      }
+    };
+
+    void loadCurrentCurrency();
+    return () => {
+      isActive = false;
+    };
+  }, [dbExpo]);
 
   // This handles the physical closing of the router modal
   const handleDismiss = () => {
@@ -43,14 +94,19 @@ export default function LanguageScreen() {
                 return (
                   <Pressable
                     key={option.code}
-                    onPress={() => {
-                      setSelectedCurrency(option.code);
-                      // Add your save logic here (e.g., AsyncStorage or Context)
+                    onPress={async () => {
+                      const nextCurrency = option.code.toUpperCase();
+                      setSelectedCurrency(nextCurrency);
+                      try {
+                        await setBaseCurrencyPreference(dbExpo, nextCurrency);
+                      } catch (error) {
+                        console.error("Failed to save base currency preference", error);
+                      }
                       closeSheet(); // This triggers the animation, then calls handleDismiss
                     }}
                     style={[styles.row, isActive ? styles.rowActive : null]}
                   >
-                    <Text style={styles.code}>{option.code}</Text>
+                    <Text style={styles.code}>{currencyFlag(option.code)} {option.code}</Text>
                     <Text style={styles.name}>{option.name}</Text>
                   </Pressable>
                 );

@@ -1,5 +1,5 @@
 import { AppText } from "@/src/app/(tabs)";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import {
   Briefcase,
@@ -11,6 +11,7 @@ import {
   Heart,
   Home, // Work/Salary
   Music, // Education
+  PiggyBank,
   PawPrint, // Health
   Plane,
   ShoppingBag,
@@ -28,6 +29,7 @@ export const CATEGORY_STYLES = {
   home: { Icon: Home, color: "#F2A15A" },
   transport: { Icon: Car, color: "#5B8CFF" },
   grocery: { Icon: ShoppingCart, color: "#B08AF6" },
+  savings: { Icon: PiggyBank, color: "#4FD27E" },
   
   // New Categories
   health: { Icon: Heart, color: "#FF3B30" },
@@ -46,45 +48,141 @@ export const CATEGORY_STYLES = {
 export type IconKey = keyof typeof CATEGORY_STYLES;
 export type CategoryKey = keyof typeof CATEGORY_STYLES;
 
+const ICON_ALIASES: Record<string, IconKey> = {
+  shoppingbag: "shopping",
+  shoppingcart: "grocery",
+  cart: "grocery",
+  bus: "transport",
+  car: "transport",
+  droplets: "bills",
+  zap: "bills",
+  wifi: "internet",
+  coffee: "food",
+  utensils: "food",
+  film: "entertainment",
+  gamepad2: "entertainment",
+  banknote: "work",
+  piggybank: "savings",
+  bookopen: "education",
+  graduationcap: "education",
+  smartphone: "tech",
+  heart: "health",
+  pawprint: "pets",
+  gift: "gift",
+  plane: "travel",
+  home: "home",
+  music: "music",
+  briefcase: "work",
+};
+
+const normalizeToken = (value: string | null | undefined): string =>
+  (value ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+
+export const resolveCategoryIconKey = (
+  rawIcon: string | null | undefined,
+  categoryName: string | null | undefined,
+): IconKey => {
+  const normalizedIcon = normalizeToken(rawIcon);
+  const normalizedCategory = normalizeToken(categoryName);
+
+  if (normalizedCategory === "groceries") return "grocery";
+  if (normalizedCategory === "transport") return "transport";
+  if (normalizedCategory === "utilities") return "bills";
+  if (normalizedCategory === "health") return "health";
+  if (normalizedCategory === "restaurants") return "food";
+  if (normalizedCategory === "entertainment") return "entertainment";
+  if (normalizedCategory === "shopping") return "shopping";
+  if (normalizedCategory === "education") return "education";
+  if (normalizedCategory === "savings") return "savings";
+
+  if (/(groc|supermarket|market)/.test(normalizedCategory)) return "grocery";
+  if (/(transport|commute|fuel|gas|ride|taxi|bus|train)/.test(normalizedCategory)) return "transport";
+  if (/(utilit|bill|internet|electric|water|phone|wifi)/.test(normalizedCategory)) return "bills";
+  if (/(health|medical|doctor|pharma|fitness|wellness)/.test(normalizedCategory)) return "health";
+  if (/(restaurant|food|dining|meal|drink|coffee)/.test(normalizedCategory)) return "food";
+  if (/(entertain|movie|cinema|game|stream)/.test(normalizedCategory)) return "entertainment";
+  if (/(educat|school|course|book|study|tuition)/.test(normalizedCategory)) return "education";
+  if (/(shop|clothes|fashion|accessories)/.test(normalizedCategory)) return "shopping";
+  if (/(saving|invest|retire|emergencyfund|goal)/.test(normalizedCategory)) return "savings";
+  if (/(pet|animal|vet)/.test(normalizedCategory)) return "pets";
+  if (/(gift|present)/.test(normalizedCategory)) return "gift";
+  if (/(travel|trip|flight|hotel|vacation)/.test(normalizedCategory)) return "travel";
+  if (/(salary|work|job|career|income)/.test(normalizedCategory)) return "work";
+  if (/(music|audio)/.test(normalizedCategory)) return "music";
+  if (/(tech|device|phone|gadget|electronics)/.test(normalizedCategory)) return "tech";
+  if (/(home|rent|mortgage|house)/.test(normalizedCategory)) return "home";
+
+  if (rawIcon && rawIcon in CATEGORY_STYLES) {
+    return rawIcon as IconKey;
+  }
+
+  if (normalizedIcon && ICON_ALIASES[normalizedIcon]) {
+    return ICON_ALIASES[normalizedIcon];
+  }
+
+  return "shopping";
+};
+
 type CategoryCardProps = {
   title: string;
   spent: number;
   budget: number;
+  hasBudget?: boolean;
   icon: CategoryKey;
   color?: string;
+  onBudgetPress?: () => void;
+  onPress?: () => void;
 };
 
-export default function CategoryCard({ title, spent, budget, icon, color }: CategoryCardProps) {
+export default function CategoryCard({
+  title,
+  spent,
+  budget,
+  hasBudget = false,
+  icon,
+  color,
+  onBudgetPress,
+  onPress,
+}: CategoryCardProps) {
   const remaining = Math.max(budget - spent, 0);
   const progress = budget > 0 ? Math.min(spent / budget, 1) : 0;
+  const formatAmount = (value: number) =>
+    value.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
   const style = CATEGORY_STYLES[icon] || CATEGORY_STYLES.shopping;
   const activeColor = color || style.color;
   const IconComponent = style.Icon;
 
   return (
-    <View style={styles.card}>
+    <Pressable style={({ pressed }) => [styles.card, pressed ? styles.cardPressed : null]} onPress={onPress}>
       <View style={styles.topRow}>
         <View style={styles.leftTop}>
-          <View style={styles.iconContainer}>
+          <View style={[styles.iconContainer, { backgroundColor: `${activeColor}20` }]}>
             <IconComponent size={22} strokeWidth={2.5} color={activeColor} />
           </View>
           <View style={styles.titleRow}>
             <AppText style={styles.titleText}>{title}</AppText>
-            <ChevronRight size={18} strokeWidth={3} color="#000" />
+            <ChevronRight size={16} strokeWidth={3} color="#374151" />
           </View>
         </View>
-        <View style={styles.budgetPill}>
-          <Text style={styles.budgetText}>${budget}</Text>
-        </View>
+        <Pressable
+          style={styles.budgetPill}
+          onPress={(event) => {
+            event.stopPropagation();
+            onBudgetPress?.();
+          }}
+          hitSlop={8}
+        >
+          <Text style={styles.budgetText}>{hasBudget ? `$${formatAmount(budget)}` : "Set"}</Text>
+        </Pressable>
       </View>
 
       <View style={styles.midRow}>
         <Text style={styles.meta}>
-          Spent: <Text style={styles.metaBold}>${spent}</Text>
+          Spent: <Text style={styles.metaBold}>${formatAmount(spent)}</Text>
         </Text>
         <Text style={styles.meta}>
-          Remaining: <Text style={styles.metaBold}>${remaining}</Text>
+          Remaining: <Text style={styles.metaBold}>${formatAmount(remaining)}</Text>
         </Text>
       </View>
 
@@ -114,90 +212,105 @@ export default function CategoryCard({ title, spent, budget, icon, color }: Cate
           />
         </View>
       </View>
-    </View>
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
     width: "92%",
-    borderRadius: 10,
+    borderRadius: 18,
     backgroundColor: "#fff",
     alignSelf: "center",
-    padding: 10,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.12,
-    shadowRadius: 4,
-    elevation: 6,
-    marginTop: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: "#E9ECF3",
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  cardPressed: {
+    transform: [{ scale: 0.992 }],
+    opacity: 0.94,
   },
   topRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 16,
+    marginBottom: 12,
   },
   leftTop: {
     flexDirection: "row",
     alignItems: "center",
+    flex: 1,
   },
   titleRow: {
     flexDirection: "row",
     alignItems: "center",
+    flex: 1,
   },
   titleText: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: "800",
-    color: "#000",
+    color: "#111827",
     marginRight: 4,
+    flexShrink: 1,
   },
   budgetPill: {
-    backgroundColor: "#F6F6F6",
+    backgroundColor: "#111827",
     borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
   },
   iconContainer: {
-    padding: 4,
-    marginRight: 5,
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 8,
   },
   budgetText: {
-    fontSize: 16,
-    fontWeight: "900",
-    color: "#000",
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#FFFFFF",
   },
   midRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 10,
+    marginBottom: 9,
   },
   meta: {
-    fontSize: 15,
-    color: "#000",
+    fontSize: 12,
+    color: "#4B5563",
+    fontWeight: "600",
   },
   metaBold: {
-    fontWeight: "900",
+    color: "#111827",
+    fontWeight: "800",
   },
   progressWrapper: {
     position: "relative",
-    height: 12,
+    height: 10,
     justifyContent: "center",
-    marginTop: 6,
+    marginTop: 4,
   },
   progressGlow: {
     position: "absolute",
-    height: 8,
+    height: 6,
     borderRadius: 999,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 4,
-    elevation: 8,
+    shadowOpacity: 0.65,
+    shadowRadius: 6,
+    elevation: 6,
   },
   progressTrack: {
-    height: 8,
+    height: 6,
     borderRadius: 999,
-    backgroundColor: "#EEE",
+    backgroundColor: "#ECEFF5",
     overflow: "hidden",
   },
   progressFill: {

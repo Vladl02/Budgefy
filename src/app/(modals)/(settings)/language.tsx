@@ -1,11 +1,18 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { SlidingSheet } from "@/src/components/SlidingSheet"; // Adjust path as needed
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useSQLiteContext } from "expo-sqlite";
+import {
+  DEFAULT_LANGUAGE,
+  getLanguagePreference,
+  setLanguagePreference,
+} from "@/src/utils/preferences";
 
 const LANGUAGE_OPTIONS = [
-  { code: "ES", name: "Spanish" },
   { code: "EN", name: "English" },
+  { code: "ES", name: "Spanish" },
   { code: "FR", name: "French" },
   { code: "DE", name: "German" },
   { code: "ZH", name: "Chinese" },
@@ -22,14 +29,68 @@ const LANGUAGE_OPTIONS = [
   { code: "PL", name: "Polish" },
   { code: "VI", name: "Vietnamese" },
   { code: "ID", name: "Indonesian" },
-  { code: "CAD", name: "Canadian Dollar" },
-  { code: "AUD", name: "Australian Dollar" },
-  { code: "CHF", name: "Swiss Franc" },
 ];
+
+const LANGUAGE_REGION_MAP: Record<string, string> = {
+  EN: "US",
+  ES: "ES",
+  FR: "FR",
+  DE: "DE",
+  ZH: "CN",
+  JA: "JP",
+  RU: "RU",
+  AR: "SA",
+  HI: "IN",
+  PT: "PT",
+  IT: "IT",
+  KO: "KR",
+  NL: "NL",
+  SV: "SE",
+  TR: "TR",
+  PL: "PL",
+  VI: "VN",
+  ID: "ID",
+};
+
+const toFlagEmoji = (regionCode: string): string =>
+  String.fromCodePoint(
+    ...regionCode
+      .toUpperCase()
+      .split("")
+      .map((char) => 127397 + char.charCodeAt(0)),
+  );
+
+const languageFlag = (languageCode: string): string => {
+  const regionCode = LANGUAGE_REGION_MAP[languageCode];
+  if (!regionCode) return "🏳️";
+  return toFlagEmoji(regionCode);
+};
 
 export default function LanguageScreen() {
   const router = useRouter();
-  const [selectedLanguage, setSelectedLanguage] = useState("EN");
+  const insets = useSafeAreaInsets();
+  const dbExpo = useSQLiteContext();
+  const [selectedLanguage, setSelectedLanguage] = useState(DEFAULT_LANGUAGE);
+  const listBottomPadding = insets.bottom + 96;
+
+  useEffect(() => {
+    let isActive = true;
+    const loadCurrentLanguage = async () => {
+      try {
+        const storedLanguage = await getLanguagePreference(dbExpo);
+        if (isActive) {
+          setSelectedLanguage(storedLanguage.toUpperCase());
+        }
+      } catch (error) {
+        console.error("Failed to load language preference", error);
+      }
+    };
+
+    void loadCurrentLanguage();
+    return () => {
+      isActive = false;
+    };
+  }, [dbExpo]);
 
   // This handles the physical closing of the router modal
   const handleDismiss = () => {
@@ -40,15 +101,17 @@ export default function LanguageScreen() {
     <View style={styles.screenWrapper}>
       <SlidingSheet 
         onDismiss={handleDismiss} 
-        heightPercent={0.6} 
+        heightPercent={0.72} 
         backdropOpacity={0.4}
       >
         {(closeSheet) => (
           <View style={styles.container}>
-            <Text style={styles.title}>Select currency</Text>
+            <Text style={styles.title}>Select language</Text>
             
             <ScrollView 
-              contentContainerStyle={styles.list} 
+              style={styles.scroll}
+              contentContainerStyle={[styles.list, { paddingBottom: listBottomPadding }]}
+              scrollIndicatorInsets={{ bottom: listBottomPadding }}
               showsVerticalScrollIndicator={false}
             >
               {LANGUAGE_OPTIONS.map((option) => {
@@ -56,14 +119,19 @@ export default function LanguageScreen() {
                 return (
                   <Pressable
                     key={option.code}
-                    onPress={() => {
-                      setSelectedLanguage(option.code);
-                      // Add your save logic here (e.g., AsyncStorage or Context)
+                    onPress={async () => {
+                      const nextLanguage = option.code.toUpperCase();
+                      setSelectedLanguage(nextLanguage);
+                      try {
+                        await setLanguagePreference(dbExpo, nextLanguage);
+                      } catch (error) {
+                        console.error("Failed to save language preference", error);
+                      }
                       closeSheet(); // This triggers the animation, then calls handleDismiss
                     }}
                     style={[styles.row, isActive ? styles.rowActive : null]}
                   >
-                    <Text style={styles.code}>{option.code}</Text>
+                    <Text style={styles.code}>{languageFlag(option.code)} {option.code}</Text>
                     <Text style={styles.name}>{option.name}</Text>
                   </Pressable>
                 );
@@ -85,7 +153,10 @@ const styles = StyleSheet.create({
     flex: 1, // Let container fill the sheet height
     paddingHorizontal: 18,
     paddingTop: 16,
-    paddingBottom: 40, 
+    paddingBottom: 12,
+  },
+  scroll: {
+    flex: 1,
   },
   title: {
     fontSize: 18,
