@@ -1,5 +1,5 @@
-import React, { useMemo, useRef, useState, useEffect } from "react";
-import { View, Text, StyleSheet, Pressable, LayoutAnimation, Platform, UIManager, Animated } from "react-native";
+import React, { useMemo, useRef, useState } from "react";
+import { View, Text, StyleSheet, Pressable, LayoutAnimation, Platform, UIManager, Animated, useWindowDimensions } from "react-native";
 import Svg, { G, Path } from "react-native-svg";
 import * as d3 from "d3-shape";
 import { Minimize2, Maximize2, Pencil } from "lucide-react-native";
@@ -25,6 +25,16 @@ type Props = {
   daysInPeriod?: number;
   onLeftPress?: () => void;
   onRightPress?: () => void;
+  onCategoryPress?: (item: SummaryItem) => void;
+};
+
+const withOpacity = (hex: string, alpha: number): string => {
+  const normalized = hex.replace("#", "").trim();
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) return hex;
+  const r = Number.parseInt(normalized.slice(0, 2), 16);
+  const g = Number.parseInt(normalized.slice(2, 4), 16);
+  const b = Number.parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 };
 
 export default function MonthlySummaryCard({
@@ -33,39 +43,53 @@ export default function MonthlySummaryCard({
   daysInPeriod = 31,
   onLeftPress,
   onRightPress,
+  onCategoryPress,
 }: Props) {
+  const { width } = useWindowDimensions();
+  const isCompactLayout = width < 380;
   const total = useMemo(() => items.reduce((s, i) => s + i.budget, 0), [items]);
   const perDay = useMemo(() => (daysInPeriod > 0 ? total / daysInPeriod : 0), [total, daysInPeriod]);
-
-  // 2. Updated Data Memo to prefer item.color
-  const data = useMemo(
-    () =>
-      items.map((i) => {
-        // Fallback to dictionary style if item.color or item.icon is missing
-        const style = CATEGORY_STYLES[i.icon] || CATEGORY_STYLES.shopping;
-        return {
-          value: i.budget,
-          color: i.color || style.color, // Prefer the custom color
-        };
-      }),
-    [items]
+  const categoryCount = items.length;
+  const averageBudget = useMemo(
+    () => (categoryCount > 0 ? total / categoryCount : 0),
+    [categoryCount, total],
+  );
+  const hasAnyBudgetSet = useMemo(
+    () => items.some((item) => item.budget > 0),
+    [items],
   );
 
-  const [collapsed, setCollapsed] = useState(false);
-  const rowAnims = useRef(items.map(() => new Animated.Value(1))).current;
-
-  // Sync animations if items change
-  useEffect(() => {
-    if (rowAnims.length < items.length) {
-      for (let i = rowAnims.length; i < items.length; i++) {
-        rowAnims.push(new Animated.Value(collapsed ? 0 : 1));
+  const data = useMemo(
+    () => {
+      if (hasAnyBudgetSet) {
+        return items
+          .filter((item) => item.budget > 0)
+          .map((i) => {
+            const style = CATEGORY_STYLES[i.icon] || CATEGORY_STYLES.shopping;
+            return { value: i.budget, color: i.color || style.color };
+          });
       }
+
+      return items.map((i) => {
+        const style = CATEGORY_STYLES[i.icon] || CATEGORY_STYLES.shopping;
+        const baseColor = i.color || style.color;
+        return { value: 1, color: withOpacity(baseColor, 0.22) };
+      });
+    },
+    [hasAnyBudgetSet, items],
+  );
+
+  const [collapsed, setCollapsed] = useState(true);
+  const rowAnims = useRef<Animated.Value[]>([]).current;
+  const getRowAnim = (index: number) => {
+    if (!rowAnims[index]) {
+      rowAnims[index] = new Animated.Value(collapsed ? 0 : 1);
     }
-  }, [items.length, collapsed, rowAnims]);
+    return rowAnims[index];
+  };
 
   const animateRows = (toValue: 0 | 1, cb?: () => void) => {
-    const anims = rowAnims
-      .slice(0, items.length)
+    const anims = Array.from({ length: items.length }, (_, idx) => getRowAnim(idx))
       .map((a) =>
         Animated.timing(a, {
           toValue,
@@ -77,6 +101,7 @@ export default function MonthlySummaryCard({
   };
 
   const handleLeftPress = () => {
+    onLeftPress?.();
     if (!collapsed) {
       animateRows(0, () => {
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -91,59 +116,97 @@ export default function MonthlySummaryCard({
 
   return (
     <View style={styles.card}>
-      <Pressable style={styles.cornerBtn} onPress={handleLeftPress} hitSlop={10}>
-        {collapsed ? (
-          <Maximize2 size={14} color="#5E6C37" strokeWidth={2.5} />
-        ) : (
-          <Minimize2 size={14} color="#5E6C37" strokeWidth={2.5} />
-        )}
-      </Pressable>
+      <View style={styles.controlsRow}>
+        <Pressable style={styles.controlBtn} onPress={handleLeftPress} hitSlop={10}>
+          {collapsed ? (
+            <Maximize2 size={14} color="#111827" strokeWidth={2.5} />
+          ) : (
+            <Minimize2 size={14} color="#111827" strokeWidth={2.5} />
+          )}
+        </Pressable>
+        <Text style={styles.headerTitle}>Monthly Budget</Text>
+        <Pressable style={styles.controlBtn} onPress={onRightPress} hitSlop={10}>
+          <Pencil size={14} color="#111827" strokeWidth={2.5} />
+        </Pressable>
+      </View>
 
-      <Pressable style={[styles.cornerBtn, { right: 16, left: undefined }]} onPress={onRightPress} hitSlop={10}>
-        <Pencil size={14} color="#5E6C37" strokeWidth={2.5} />
-      </Pressable>
+      <View style={[styles.summaryRow, isCompactLayout ? styles.summaryRowCompact : null]}>
+        <View style={[styles.donutShell, isCompactLayout ? styles.donutShellCompact : null]}>
+          <Donut size={isCompactLayout ? 104 : 116} strokeWidth={isCompactLayout ? 12 : 14} data={data} />
+          <View style={[styles.donutCenter, isCompactLayout ? styles.donutCenterCompact : null]}>
+            <Text style={styles.donutCenterLabel}>Total</Text>
+            <Text style={styles.donutCenterValue}>${formatMoney(total)}</Text>
+          </View>
+        </View>
 
-      {/* Header area */}
-      <View style={styles.headerRow}>
-        <Donut size={100} strokeWidth={12} data={data} />
-        <View style={styles.totals}>
-          <Text style={styles.label}>{label}</Text>
-          <Text style={styles.total}>${formatMoney(total)}</Text>
-          <Text style={styles.perDay}>~${formatMoney(perDay)} per day</Text>
+        <View style={[styles.statsColumn, isCompactLayout ? styles.statsColumnCompact : null]}>
+          <View style={styles.statRow}>
+            <View style={styles.statCard}>
+              <Text style={styles.statKey}>Period</Text>
+              <Text style={styles.statVal}>{label}</Text>
+            </View>
+            <View style={[styles.statCard, styles.statCardGap]}>
+              <Text style={styles.statKey}>Per Day</Text>
+              <Text style={styles.statVal}>${formatMoney(perDay)}</Text>
+            </View>
+          </View>
+          <View style={styles.statRow}>
+            <View style={styles.statCard}>
+              <Text style={styles.statKey}>Categories</Text>
+              <Text style={styles.statVal}>{categoryCount}</Text>
+            </View>
+            <View style={[styles.statCard, styles.statCardGap]}>
+              <Text style={styles.statKey}>Average</Text>
+              <Text style={styles.statVal}>${formatMoney(averageBudget)}</Text>
+            </View>
+          </View>
         </View>
       </View>
 
-      {/* Rows */}
       {!collapsed && (
-        <View>
+        <View style={styles.rowsSection}>
           {items.map((item, idx) => {
             const pct = total > 0 ? (item.budget / total) * 100 : 0;
-            
-            // 3. Updated render logic to prefer item.color
             const style = CATEGORY_STYLES[item.icon] || CATEGORY_STYLES.shopping;
             const Icon = style.Icon;
-            const activeColor = item.color || style.color; // Prefer custom color
+            const activeColor = item.color || style.color;
 
-            const anim = rowAnims[idx];
+            const anim = getRowAnim(idx);
             const translateY = anim.interpolate({
               inputRange: [0, 1],
               outputRange: [-8, 0],
             });
 
             return (
-              <Animated.View
-                key={item.id}
-                style={{ opacity: anim, transform: [{ translateY }] }}
-              >
-                <View style={styles.row}>
-                  <View style={styles.rowLeft}>
-                    {/* Use activeColor here */}
-                    <Icon size={24} color={activeColor} strokeWidth={2.5} />
-                    <Text style={styles.rowTitle}>{item.title}</Text>
-                    <Text style={styles.rowPct}>{pct.toFixed(2)}%</Text>
+              <Animated.View key={item.id} style={{ opacity: anim, transform: [{ translateY }] }}>
+                <Pressable
+                  style={({ pressed }) => [styles.rowCard, pressed ? styles.rowCardPressed : null]}
+                  onPress={() => onCategoryPress?.(item)}
+                >
+                  <View style={styles.rowTop}>
+                    <View style={styles.rowLeft}>
+                      <View style={[styles.rowIconBubble, { backgroundColor: `${activeColor}20` }]}>
+                        <Icon size={18} color={activeColor} strokeWidth={2.5} />
+                      </View>
+                      <View style={styles.rowTextWrap}>
+                        <Text style={styles.rowTitle}>{item.title}</Text>
+                        <Text style={styles.rowPct}>{pct.toFixed(1)}% of total</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.rowAmount}>${formatMoney(item.budget)}</Text>
                   </View>
-                  <Text style={styles.rowAmount}>${formatMoney(item.budget)}</Text>
-                </View>
+                  <View style={styles.rowBarTrack}>
+                    <View
+                      style={[
+                        styles.rowBarFill,
+                        {
+                          backgroundColor: activeColor,
+                          width: `${Math.min(Math.max(pct, 0), 100)}%`,
+                        },
+                      ]}
+                    />
+                  </View>
+                </Pressable>
               </Animated.View>
             );
           })}
@@ -178,8 +241,8 @@ function Donut({
         .arc<d3.PieArcDatum<{ value: number; color: string }>>()
         .outerRadius(radius)
         .innerRadius(innerRadius)
-        .padAngle(0.02),
-    [radius, innerRadius]
+        .padAngle(data.length > 1 ? 0.02 : 0),
+    [data.length, innerRadius, radius]
   );
 
   return (
@@ -204,81 +267,193 @@ function formatMoney(n: number) {
 const styles = StyleSheet.create({
   card: {
     backgroundColor: "#fff",
-    borderRadius: 22,
-    padding: 16,
-    width: "92%",
-    alignSelf: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.12,
-    shadowRadius: 22,
-    elevation: 8,
+    borderRadius: 20,
+    padding: 14,
+    width: "100%",
+    alignSelf: "stretch",
+    borderWidth: 1,
+    borderColor: "#E9ECF3",
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    elevation: 4,
   },
-  cornerBtn: {
-    position: "absolute",
-    top: 16,
-    left: 16,
-    width: 30,
-    height: 30,
-    borderRadius: 18,
-    backgroundColor: "rgba(94,108,55,0.18)",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 10,
-  },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingTop: 30,
-    paddingBottom: 12,
-  },
-  totals: {
-    marginLeft: 16,
-    flex: 1,
-    alignItems: "center",
-  },
-  label: {
-    color: "rgba(0,0,0,0.45)",
-    fontSize: 18,
-    fontWeight: "700",
-    marginBottom: 6,
-  },
-  total: {
-    fontSize: 32,
-    fontWeight: "900",
-    color: "#000",
-  },
-  perDay: {
-    color: "rgba(0,0,0,0.35)",
-    fontSize: 18,
-    fontWeight: "600",
-  },
-  row: {
+  controlsRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  headerTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+    color: "#111827",
+    textTransform: "uppercase",
+  },
+  controlBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#F3F4F6",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  summaryRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  summaryRowCompact: {
+    flexDirection: "column",
+    alignItems: "center",
+  },
+  donutShell: {
+    width: 118,
+    height: 118,
+    borderRadius: 59,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+    marginRight: 10,
+  },
+  donutShellCompact: {
+    marginRight: 0,
+    marginBottom: 12,
+  },
+  donutCenter: {
+    position: "absolute",
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#EEF1F6",
+  },
+  donutCenterCompact: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+  },
+  donutCenterLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#6B7280",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  donutCenterValue: {
+    marginTop: 2,
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#111827",
+  },
+  statsColumn: {
+    flex: 1,
+    paddingTop: 4,
+  },
+  statsColumnCompact: {
+    width: "100%",
+    paddingTop: 0,
+  },
+  statRow: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  statCard: {
+    flex: 1,
+    minHeight: 54,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#F9FAFB",
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+  },
+  statCardGap: {
+    marginLeft: 8,
+  },
+  statKey: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#6B7280",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  statVal: {
+    marginTop: 4,
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#111827",
+  },
+  rowsSection: {
+    marginTop: 10,
+  },
+  rowCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#EEF1F5",
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    marginTop: 8,
+  },
+  rowCardPressed: {
+    opacity: 0.92,
+    transform: [{ scale: 0.99 }],
   },
   rowLeft: {
     flexDirection: "row",
     alignItems: "center",
     flex: 1,
   },
+  rowTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  rowIconBubble: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  rowTextWrap: {
+    marginLeft: 8,
+    flex: 1,
+  },
   rowTitle: {
-    fontSize: 18,
-    fontWeight: "500",
-    color: "#000",
-    marginLeft: 6,
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#111827",
   },
   rowPct: {
-    fontSize: 15,
+    marginTop: 2,
+    fontSize: 11,
     fontWeight: "600",
-    color: "rgba(0,0,0,0.35)",
-    marginLeft: 6,
+    color: "#6B7280",
   },
   rowAmount: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#000",
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#111827",
+  },
+  rowBarTrack: {
+    marginTop: 8,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: "#ECEFF5",
+    overflow: "hidden",
+  },
+  rowBarFill: {
+    height: "100%",
+    borderRadius: 999,
   },
 });

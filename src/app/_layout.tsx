@@ -13,7 +13,7 @@ import { users } from "../db/schema";
 import { seedAppData } from "../db/seed-data";
 import { RecommendationStoreProvider } from "../providers/RecommendationStoreProvider";
 
-const DATABASE_NAME = "users_3.db";
+const DATABASE_NAME = "users_4.db";
 
 export default function RootLayout() {
   const expo = useMemo(() => openDatabaseSync(DATABASE_NAME), []);
@@ -67,6 +67,14 @@ export default function RootLayout() {
             <RecommendationStoreProvider>
               <Stack screenOptions={{ headerShown: false }}>
                 <Stack.Screen name="(tabs)" options={{ headerShown: false, animation: "default" }} />
+                <Stack.Screen
+                  name="category/[categoryId]"
+                  options={{
+                    headerShown: false,
+                    presentation: "card",
+                    animation: "slide_from_right",
+                  }}
+                />
                 <Stack.Screen
                   name="(modals)/addExpense"
                   options={{ 

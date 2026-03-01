@@ -1,84 +1,124 @@
-import React, { useState } from "react";
-import { View, Text, StyleSheet, FlatList } from "react-native";
+import React, { useMemo, useState } from "react";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
+import { drizzle, useLiveQuery } from "drizzle-orm/expo-sqlite";
+import { useSQLiteContext } from "expo-sqlite";
+import { Sparkles } from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-// --- Imports ---
 import { SlidingSheet } from "@/src/components/SlidingSheet";
-import CategoryCard from "@/src/components/overview/category";
 import MonthlySummaryCard from "@/src/components/overview/donutCard";
-// Import the new separate component
 import EditBudgetModal, { SummaryItem } from "@/src/components/overview/EditBudgetModal";
-
-// --- Initial Data ---
-const INITIAL_DATA: SummaryItem[] = [
-  { id: "1", title: "Shopping", spent: 14, budget: 56, icon: "shopping" },
-  { id: "2", title: "Food & Drinks", spent: 14, budget: 76.5, icon: "food" },
-  { id: "3", title: "Home Bills", spent: 14, budget: 76.5, icon: "home" },
-  { id: "4", title: "Transport", spent: 25, budget: 55, icon: "transport" },
-  { id: "5", title: "Groceries", spent: 89, budget: 100, icon: "grocery" },
-];
+import { resolveCategoryIconKey, type IconKey } from "@/src/components/overview/category";
+import { categoriesForMonth, paymentSumsByCategory } from "@/src/utils/queries";
+import { useBudgetStore } from "@/src/stores/budgetStore";
 
 export default function BudgetSheet() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const dbExpo = useSQLiteContext();
+  const db = drizzle(dbExpo);
 
-  // Main State
-  const [items, setItems] = useState(INITIAL_DATA);
+  const { budgetOverrides, setAllBudgets } = useBudgetStore();
   const [isEditModalVisible, setEditModalVisible] = useState(false);
 
-  // Derived State
-  const totalSpent = items.reduce((sum, item) => sum + item.spent, 0);
+  const currentMonth = useMemo(
+    () => new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+    [],
+  );
+  const categoriesQuery = useMemo(
+    () => categoriesForMonth(db, currentMonth),
+    [db, currentMonth],
+  );
+  const paymentsQuery = useMemo(
+    () => paymentSumsByCategory(db),
+    [db],
+  );
+  const { data: categoriesData } = useLiveQuery(categoriesQuery);
+  const { data: paymentSumsData } = useLiveQuery(paymentsQuery);
 
-  // Handlers
+  const paymentSumsByCategoryId = useMemo(
+    () => new Map(paymentSumsData.map((row) => [row.categoryId, Number(row.totalSumCents)])),
+    [paymentSumsData],
+  );
+  const items = useMemo<SummaryItem[]>(
+    () =>
+      categoriesData.map((item) => {
+        const rawSpentCents = paymentSumsByCategoryId.get(item.id) ?? 0;
+        const spent = Number((rawSpentCents / 100).toFixed(2));
+        const icon: IconKey = resolveCategoryIconKey(item.icon, item.categoryName);
+        const budget = budgetOverrides[String(item.id)] ?? 0;
+
+        return {
+          id: String(item.id),
+          title: item.categoryName,
+          spent,
+          budget,
+          icon,
+          color: item.color,
+        };
+      }),
+    [budgetOverrides, categoriesData, paymentSumsByCategoryId],
+  );
+
+  const topSpendingCategory = useMemo(() => {
+    if (items.length === 0) return null;
+    return [...items].sort((a, b) => (b.spent ?? 0) - (a.spent ?? 0))[0];
+  }, [items]);
   const handleDismiss = () => router.back();
-  
   const handleSaveBudget = (newItems: SummaryItem[]) => {
-    setItems(newItems);
+    const nextOverrides = newItems.reduce<Record<string, number>>((acc, item) => {
+      if (item.budget > 0) {
+        acc[item.id] = item.budget;
+      }
+      return acc;
+    }, {});
+    setAllBudgets(nextOverrides);
   };
 
   return (
     <View style={styles.screenWrapper}>
-      <SlidingSheet
-        onDismiss={handleDismiss}
-        heightPercent={0.85}
-        backdropOpacity={0.4}
-      >
+      <SlidingSheet onDismiss={handleDismiss} heightPercent={0.68} backdropOpacity={0.4}>
         {() => (
           <View style={styles.sheetContainer}>
             <Text style={styles.sheetTitle}>Monthly Budget</Text>
 
-            <FlatList
-              data={items}
-              keyExtractor={(item) => item.id}
+            <ScrollView
+              style={styles.scroll}
+              contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 20 }]}
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={styles.listContent}
-              // Header: Donut Chart + Totals
-              ListHeaderComponent={
-                <View style={styles.headerComponent}>
-                  <MonthlySummaryCard
-                    items={items}
-                    daysInPeriod={31}
-                    // Trigger the modal
-                    onRightPress={() => setEditModalVisible(true)}
-                  />
-                  <View style={styles.totalContainer}>
-                    <Text style={styles.totalLabel}>Total Spent</Text>
-                    <Text style={styles.totalValue}>${totalSpent.toFixed(2)}</Text>
-                  </View>
-                </View>
-              }
-              // Items
-              renderItem={({ item }) => (
-                <CategoryCard
-                  title={item.title}
-                  spent={item.spent}
-                  budget={item.budget}
-                  icon={item.icon}
-                  color={item.color}
+            >
+              <View style={styles.headerComponent}>
+                <MonthlySummaryCard
+                  items={items}
+                  daysInPeriod={31}
+                  onRightPress={() => setEditModalVisible(true)}
                 />
-              )}
-            />
+                <View style={styles.insightCard}>
+                  <View style={styles.insightTopRow}>
+                    <View style={styles.insightIconWrap}>
+                      <Sparkles size={14} color="#57A7FD" />
+                    </View>
+                    <Text style={styles.insightLabel}>Top Spend Insight</Text>
+                  </View>
+                  {topSpendingCategory ? (
+                    <>
+                      <Text style={styles.insightCategory}>{topSpendingCategory.title}</Text>
+                      <Text style={styles.insightValue}>
+                        Highest category spend this month: ${(topSpendingCategory.spent ?? 0).toFixed(2)}
+                      </Text>
+                      <View style={styles.insightChipRow}>
+                        <View style={[styles.insightColorDot, { backgroundColor: topSpendingCategory.color ?? "#57A7FD" }]} />
+                        <Text style={styles.insightChipText}>Most spent category right now</Text>
+                      </View>
+                    </>
+                  ) : (
+                    <Text style={styles.insightValue}>No spending data yet for this month.</Text>
+                  )}
+                </View>
+              </View>
+            </ScrollView>
 
-            {/* Render the Separate Component */}
             <EditBudgetModal
               visible={isEditModalVisible}
               onClose={() => setEditModalVisible(false)}
@@ -100,7 +140,13 @@ const styles = StyleSheet.create({
   sheetContainer: {
     flex: 1,
     paddingTop: 16,
-    paddingHorizontal: 0,
+    paddingHorizontal: 16,
+  },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingTop: 4,
   },
   sheetTitle: {
     fontSize: 18,
@@ -109,26 +155,71 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 8,
   },
-  listContent: {
-    paddingBottom: 40,
-    paddingHorizontal: 16,
-  },
   headerComponent: {
-    marginBottom: 24,
-    gap: 16,
+    gap: 12,
   },
-  totalContainer: {
+  insightCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(87,167,253,0.3)",
+    backgroundColor: "#0F172A",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  insightTopRow: {
+    flexDirection: "row",
     alignItems: "center",
-    marginTop: 8,
+    gap: 8,
   },
-  totalLabel: {
-    fontSize: 14,
-    color: "#666",
-    fontWeight: "600",
+  insightIconWrap: {
+    width: 24,
+    height: 24,
+    borderRadius: 8,
+    backgroundColor: "rgba(87,167,253,0.16)",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  totalValue: {
-    fontSize: 24,
+  insightLabel: {
+    fontSize: 11,
     fontWeight: "800",
-    color: "#1F1F1F",
+    color: "#9CC8FF",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  insightCategory: {
+    marginTop: 8,
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  insightValue: {
+    marginTop: 4,
+    fontSize: 13,
+    fontWeight: "500",
+    color: "#D7E3F7",
+    lineHeight: 18,
+  },
+  insightChipRow: {
+    marginTop: 10,
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  insightColorDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+  },
+  insightChipText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#E5E7EB",
   },
 });

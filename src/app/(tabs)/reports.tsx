@@ -35,7 +35,9 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { categories as categoriesTable, payments as paymentsTable, users } from "@/src/db/schema";
 import { categoriesForMonth } from "@/src/utils/queries";
+import { desc, eq } from "drizzle-orm";
 import { drizzle, useLiveQuery } from "drizzle-orm/expo-sqlite";
 import { useSQLiteContext } from "expo-sqlite";
 
@@ -204,7 +206,7 @@ const INITIAL_DATA: ReceiptItem[] = [
 
 // --- MAIN SCREEN ---
 export default function Reports() {
-  const [receipts, setReceipts] = useState<ReceiptItem[]>(INITIAL_DATA);
+  const [receiptEdits, setReceiptEdits] = useState<Record<string, ReceiptItem>>({});
   const [selectedReceipt, setSelectedReceipt] = useState<ReceiptItem | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [activeFilter, setActiveFilter] = useState("All");
@@ -215,8 +217,73 @@ export default function Reports() {
   );
   const dbExpo = useSQLiteContext();
   const db = drizzle(dbExpo);
+  const usersQuery = useMemo(
+    () =>
+      db
+        .select({
+          id: users.id,
+        })
+        .from(users)
+        .orderBy(users.id)
+        .limit(1),
+    [db],
+  );
+  const { data: usersData } = useLiveQuery(usersQuery);
+  const activeUserId = usersData[0]?.id ?? 1;
+  const allPaymentsQuery = useMemo(
+    () =>
+      db
+        .select({
+          paymentId: paymentsTable.id,
+          sumCents: paymentsTable.sum,
+          marketName: paymentsTable.marketName,
+          createdAt: paymentsTable.createdAt,
+          receiptPhotoLink: paymentsTable.receiptPhotoLink,
+          categoryName: categoriesTable.categoryName,
+        })
+        .from(paymentsTable)
+        .leftJoin(categoriesTable, eq(paymentsTable.categoryId, categoriesTable.id))
+        .where(eq(paymentsTable.userId, activeUserId))
+        .orderBy(desc(paymentsTable.createdAt), desc(paymentsTable.id)),
+    [db, activeUserId],
+  );
+  const { data: allPaymentsData } = useLiveQuery(allPaymentsQuery);
   const categoriesQuery = useMemo(() => categoriesForMonth(db, selectedMonthStart), [db, selectedMonthStart]);
   const { data: categoriesData } = useLiveQuery(categoriesQuery);
+  const dbReceipts = useMemo<ReceiptItem[]>(() => {
+    return allPaymentsData.map((payment) => {
+      const createdAtRaw = payment.createdAt as Date | number | string | null | undefined;
+      const createdAtDate =
+        createdAtRaw instanceof Date ? createdAtRaw : createdAtRaw ? new Date(createdAtRaw) : new Date();
+      const safeDate = Number.isNaN(createdAtDate.getTime()) ? new Date() : createdAtDate;
+      const year = safeDate.getFullYear();
+      const month = String(safeDate.getMonth() + 1).padStart(2, "0");
+      const day = String(safeDate.getDate()).padStart(2, "0");
+      const fullDate = `${year}-${month}-${day}`;
+      const shortDate = safeDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      const amount = Number(payment.sumCents ?? 0) / 100;
+      const category = payment.categoryName?.trim() || "General";
+      const merchant = payment.marketName?.trim() || category;
+
+      return {
+        id: `db-${payment.paymentId}`,
+        title: merchant,
+        date: `${shortDate} · Card`,
+        amount: `RON ${amount.toFixed(2)}`,
+        fullDate,
+        category,
+        currency: "RON",
+        comment: "",
+        fullPage: false,
+        receiptPhotoUri: payment.receiptPhotoLink ?? null,
+        status: "processed",
+      };
+    });
+  }, [allPaymentsData]);
+  const receipts = useMemo<ReceiptItem[]>(
+    () => [...INITIAL_DATA, ...dbReceipts].map((item) => ({ ...item, ...(receiptEdits[item.id] ?? {}) })),
+    [dbReceipts, receiptEdits],
+  );
   const currentMonthLabel = useMemo(
     () => selectedMonthStart.toLocaleDateString("en-US", { month: "long", year: "numeric" }),
     [selectedMonthStart],
@@ -295,11 +362,28 @@ export default function Reports() {
   };
 
   const handleSaveReceipt = (updatedItem: ReceiptItem) => {
-    setReceipts((prev) => {
-      const exists = prev.find((r) => r.id === updatedItem.id);
-      if (exists) return prev.map((r) => (r.id === updatedItem.id ? updatedItem : r));
-      return [updatedItem, ...prev];
-    });
+    setReceiptEdits((prev) => ({
+      ...prev,
+      [updatedItem.id]: updatedItem,
+    }));
+
+    if (updatedItem.id.startsWith("db-")) {
+      const paymentId = Number(updatedItem.id.replace("db-", ""));
+      const parsedAmount = Number.parseFloat(updatedItem.amount.replace(/[^0-9.]/g, ""));
+      const amountInCents = Number.isFinite(parsedAmount)
+        ? Math.round((parsedAmount + Number.EPSILON) * 100)
+        : null;
+
+      if (Number.isFinite(paymentId) && paymentId > 0 && amountInCents !== null) {
+        void dbExpo
+          .runAsync(`UPDATE payments SET sum = ? WHERE id = ?`, [amountInCents, paymentId])
+          .catch((error) => {
+            console.error("Failed to persist receipt amount update:", error);
+          });
+      }
+    }
+
+    setSelectedReceipt(updatedItem);
     setModalVisible(false);
   };
 
