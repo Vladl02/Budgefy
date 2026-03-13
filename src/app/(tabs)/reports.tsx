@@ -1,43 +1,175 @@
 import { ReceiptDetailModal } from "@/src/components/Reports/ReceiptDetailModal";
-import { ReportCard } from "@/src/components/Reports/ReportCard";
 import { SelectionModal } from "@/src/components/Reports/SelectionModal";
+import { STATUS_CONFIG } from "@/src/components/Reports/constants";
 import type { ReceiptItem } from "@/src/components/Reports/types";
 import { categories as categoriesTable, payments as paymentsTable, users } from "@/src/db/schema";
 import { useAppTheme } from "@/src/providers/AppThemeProvider";
 import { useIsFocused } from "@react-navigation/native";
 import { FlashList } from "@shopify/flash-list";
+import { LinearGradient } from "expo-linear-gradient";
 import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { drizzle, useLiveQuery } from "drizzle-orm/expo-sqlite";
 import { useSQLiteContext } from "expo-sqlite";
 import {
+  Baby,
+  Banknote,
+  BookOpen,
+  BriefcaseBusiness,
+  Bus,
+  Car,
+  ChevronRight,
   ChevronDown,
+  CircleHelp,
+  Coffee,
+  Droplets,
+  Dumbbell,
+  Film,
+  Fuel,
+  Gamepad2,
+  Gift,
+  GraduationCap,
+  Heart,
+  House,
   Info,
   Minus,
+  PawPrint,
+  Phone,
+  PiggyBank,
+  Plane,
+  ReceiptText,
   Search,
+  ShieldPlus,
+  ShoppingBag,
+  ShoppingBasket,
+  ShoppingCart,
+  Smartphone,
+  Sparkles,
+  Stethoscope,
+  Trash2,
+  Tv,
   TrendingDown,
   TrendingUp,
+  Utensils,
+  Wrench,
   X,
+  Zap,
 } from "lucide-react-native";
+import type { LucideIcon } from "lucide-react-native";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
   Animated,
   Easing,
   Modal,
-  ScrollView,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View
 } from "react-native";
-
-
-import { SafeArea } from "@/src/components/SafeArea";
-const FILTER_OPTIONS = ["All", "Receipts", "Cash", "Card", "Needs Action"] as const;
+import { Swipeable } from "react-native-gesture-handler";
 const MONTH_LABEL_FORMAT: Intl.DateTimeFormatOptions = { month: "long", year: "numeric" };
+const TRANSACTION_DATE_FORMAT: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "numeric" };
 const DATE_METHOD_SEPARATOR = " - ";
+const ICONS_BY_NAME: Record<string, LucideIcon> = {
+  Banknote,
+  Baby,
+  BriefcaseBusiness,
+  BookOpen,
+  Bus,
+  Car,
+  Coffee,
+  Droplets,
+  Dumbbell,
+  Film,
+  Fuel,
+  Gamepad2,
+  Gift,
+  GraduationCap,
+  Heart,
+  House,
+  PawPrint,
+  Phone,
+  Plane,
+  PiggyBank,
+  ShieldPlus,
+  ShoppingBag,
+  ShoppingBasket,
+  ShoppingCart,
+  Smartphone,
+  Sparkles,
+  Stethoscope,
+  Tv,
+  Utensils,
+  Wrench,
+  Zap,
+};
 
 const formatMonthLabel = (date: Date): string => date.toLocaleDateString("en-US", MONTH_LABEL_FORMAT);
+const formatGroupDateLabel = (date: Date): string =>
+  date.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+const formatTransactionDateLabel = (date: Date | string): string =>
+  getSafeDate(date).toLocaleDateString("en-GB", TRANSACTION_DATE_FORMAT);
+const normalizeToken = (value: string | null | undefined): string =>
+  (value ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+const withAlpha = (hexColor: string, alpha: number): string => {
+  const normalized = hexColor.replace("#", "").trim();
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) {
+    return `rgba(17, 24, 39, ${alpha})`;
+  }
+
+  const r = Number.parseInt(normalized.slice(0, 2), 16);
+  const g = Number.parseInt(normalized.slice(2, 4), 16);
+  const b = Number.parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+const resolveCategoryIcon = (
+  rawIcon: string | null | undefined,
+  categoryName: string | null | undefined,
+): LucideIcon => {
+  const normalizedCategory = normalizeToken(categoryName);
+
+  if (normalizedCategory === "groceries") return ShoppingCart;
+  if (normalizedCategory === "transport") return Car;
+  if (normalizedCategory === "fuel") return Fuel;
+  if (normalizedCategory === "utilities" || normalizedCategory === "bills") return Zap;
+  if (normalizedCategory === "home") return House;
+  if (normalizedCategory === "health") return Stethoscope;
+  if (normalizedCategory === "fitness") return Dumbbell;
+  if (normalizedCategory === "restaurants" || normalizedCategory === "restaurant") return Utensils;
+  if (normalizedCategory === "coffee") return Coffee;
+  if (normalizedCategory === "entertainment") return Film;
+  if (normalizedCategory === "streaming") return Tv;
+  if (normalizedCategory === "gaming") return Gamepad2;
+  if (normalizedCategory === "shopping") return ShoppingBag;
+  if (normalizedCategory === "clothing") return ShoppingBasket;
+  if (normalizedCategory === "education") return GraduationCap;
+  if (normalizedCategory === "books") return BookOpen;
+  if (normalizedCategory === "work") return BriefcaseBusiness;
+  if (normalizedCategory === "travel") return Plane;
+  if (normalizedCategory === "phone") return Smartphone;
+  if (normalizedCategory === "gifts") return Gift;
+  if (normalizedCategory === "family") return Baby;
+  if (normalizedCategory === "pets") return PawPrint;
+  if (normalizedCategory === "insurance") return ShieldPlus;
+  if (normalizedCategory === "savings") return PiggyBank;
+  if (normalizedCategory === "misc") return Sparkles;
+
+  if (/(groc|supermarket|market)/.test(normalizedCategory)) return ShoppingCart;
+  if (/(transport|commute|fuel|gas|ride|taxi|bus|train)/.test(normalizedCategory)) return Car;
+  if (/(utilit|bill|internet|electric|water|phone|wifi)/.test(normalizedCategory)) return Zap;
+  if (/(health|medical|doctor|pharma|fitness|wellness)/.test(normalizedCategory)) return Stethoscope;
+  if (/(restaurant|food|dining|meal|drink)/.test(normalizedCategory)) return Utensils;
+  if (/(coffee|cafe)/.test(normalizedCategory)) return Coffee;
+  if (/(entertain|movie|cinema|stream)/.test(normalizedCategory)) return Film;
+  if (/(educat|school|course|book|study|tuition)/.test(normalizedCategory)) return GraduationCap;
+  if (/(shop|clothes|fashion|accessories)/.test(normalizedCategory)) return ShoppingBag;
+  if (/(saving|invest|retire|emergencyfund|goal)/.test(normalizedCategory)) return PiggyBank;
+
+  return ICONS_BY_NAME[rawIcon ?? ""] ?? CircleHelp;
+};
 const CURRENCY_FORMAT_OPTIONS: Intl.NumberFormatOptions = {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
@@ -235,17 +367,29 @@ const INITIAL_DATA: ReceiptItem[] = [
   },
 ];
 
+type ReceiptGroup = {
+  id: string;
+  fullDate: string;
+  label: string;
+  items: ReceiptItem[];
+};
+
 export default function Reports() {
   const isFocused = useIsFocused();
   const { isDark } = useAppTheme();
   const [receiptEdits, setReceiptEdits] = useState<Record<string, ReceiptItem>>({});
+  const [deletedReceiptIds, setDeletedReceiptIds] = useState<Record<string, true>>({});
   const [selectedReceipt, setSelectedReceipt] = useState<ReceiptItem | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
-  const [activeFilter, setActiveFilter] = useState<(typeof FILTER_OPTIONS)[number]>("All");
   const [searchQuery, setSearchQuery] = useState("");
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [showTrendInfo, setShowTrendInfo] = useState(false);
   const [selectedMonthStart, setSelectedMonthStart] = useState<Date>(() => toMonthStart(new Date()));
+  const [showTopScrollBlur, setShowTopScrollBlur] = useState(false);
+  const [showBottomScrollBlur, setShowBottomScrollBlur] = useState(false);
+  const swipeableRefs = useRef<Record<string, Swipeable | null>>({});
+  const listViewportHeightRef = useRef(0);
+  const listContentHeightRef = useRef(0);
   const selectedMonthEnd = useMemo(
     () => new Date(selectedMonthStart.getFullYear(), selectedMonthStart.getMonth() + 1, 1),
     [selectedMonthStart],
@@ -275,9 +419,12 @@ export default function Reports() {
           paymentId: paymentsTable.id,
           sumCents: paymentsTable.sum,
           marketName: paymentsTable.marketName,
+          sourceType: paymentsTable.sourceType,
           createdAt: paymentsTable.createdAt,
           receiptPhotoLink: paymentsTable.receiptPhotoLink,
           categoryName: categoriesTable.categoryName,
+          categoryColor: categoriesTable.color,
+          categoryIcon: categoriesTable.icon,
         })
         .from(paymentsTable)
         .innerJoin(activeUserSubquery, eq(paymentsTable.userId, activeUserSubquery.id))
@@ -350,21 +497,29 @@ export default function Reports() {
         fullPage: false,
         receiptPhotoUri: payment.receiptPhotoLink ?? null,
         status: "processed",
+        sourceType: payment.sourceType ?? "manual",
+        categoryIconName: payment.categoryIcon ?? null,
+        categoryColor: payment.categoryColor ?? null,
       };
     });
   }, [selectedMonthPaymentsData]);
 
   const seededReceipts = useMemo(
-    () => INITIAL_DATA.map((item) => ({ ...item, ...(receiptEdits[item.id] ?? {}) })),
-    [receiptEdits],
+    () =>
+      INITIAL_DATA
+        .filter((item) => !deletedReceiptIds[item.id])
+        .map((item) => ({ ...item, ...(receiptEdits[item.id] ?? {}) })),
+    [deletedReceiptIds, receiptEdits],
   );
 
   const receipts = useMemo(
     () => [
       ...seededReceipts,
-      ...dbReceipts.map((item) => ({ ...item, ...(receiptEdits[item.id] ?? {}) })),
+      ...dbReceipts
+        .filter((item) => !deletedReceiptIds[item.id])
+        .map((item) => ({ ...item, ...(receiptEdits[item.id] ?? {}) })),
     ],
-    [dbReceipts, receiptEdits, seededReceipts],
+    [dbReceipts, deletedReceiptIds, receiptEdits, seededReceipts],
   );
 
   const sortedReceipts = useMemo(
@@ -530,25 +685,45 @@ export default function Reports() {
   }, [trendDifferenceValue]);
 
   const filteredReceipts = useMemo(() => {
-    const filterMatched =
-      activeFilter === "All" || activeFilter === "Receipts"
-        ? monthFilteredReceipts
-        : activeFilter === "Needs Action"
-          ? monthFilteredReceipts.filter((item) => item.status === "needs action")
-          : monthFilteredReceipts.filter((item) => item.date.includes(activeFilter));
-
     const normalizedSearch = searchQuery.trim().toLowerCase();
     if (!normalizedSearch) {
-      return filterMatched;
+      return monthFilteredReceipts;
     }
 
-    return filterMatched.filter((item) =>
+    return monthFilteredReceipts.filter((item) =>
       [item.title, item.category, item.amount, item.date, item.status]
         .join(" ")
         .toLowerCase()
         .includes(normalizedSearch),
     );
-  }, [activeFilter, monthFilteredReceipts, searchQuery]);
+  }, [monthFilteredReceipts, searchQuery]);
+
+  const groupedReceipts = useMemo<ReceiptGroup[]>(() => {
+    const groupsByDate = new Map<string, ReceiptGroup>();
+    const orderedGroups: ReceiptGroup[] = [];
+
+    filteredReceipts.forEach((item) => {
+      const key = item.fullDate;
+      const existingGroup = groupsByDate.get(key);
+
+      if (existingGroup) {
+        existingGroup.items.push(item);
+        return;
+      }
+
+      const group: ReceiptGroup = {
+        id: `group-${key}`,
+        fullDate: key,
+        label: formatGroupDateLabel(getSafeDate(item.fullDate)),
+        items: [item],
+      };
+
+      groupsByDate.set(key, group);
+      orderedGroups.push(group);
+    });
+
+    return orderedGroups;
+  }, [filteredReceipts]);
 
   const categoryOptions = useMemo(() => {
     if (categoriesData.length > 0) {
@@ -652,31 +827,264 @@ export default function Reports() {
     [monthStartByLabel],
   );
 
-  const keyExtractor = useCallback((item: ReceiptItem) => item.id, []);
+  const closeOtherSwipeables = useCallback((openedId: string) => {
+    Object.entries(swipeableRefs.current).forEach(([id, instance]) => {
+      if (id !== openedId) {
+        instance?.close();
+      }
+    });
+  }, []);
 
-  const renderReceiptItem = useCallback(
-    ({ item }: { item: ReceiptItem }) => (
-      <TouchableOpacity activeOpacity={0.7} onPress={() => handleOpenReceipt(item)}>
-        <ReportCard
-          title={item.title}
-          date={item.date}
-          amount={item.amount}
-          status={item.status}
-          receiptPhotoUri={item.receiptPhotoUri}
-        />
-      </TouchableOpacity>
-    ),
-    [handleOpenReceipt],
+  const updateScrollEdgeBlur = useCallback((offsetY: number) => {
+    const viewportHeight = listViewportHeightRef.current;
+    const contentHeight = listContentHeightRef.current;
+    if (viewportHeight <= 0 || contentHeight <= 0) {
+      setShowTopScrollBlur(false);
+      setShowBottomScrollBlur(false);
+      return;
+    }
+
+    const canScroll = contentHeight - viewportHeight > 8;
+    const topVisible = canScroll && offsetY > 3;
+    const remaining = contentHeight - (offsetY + viewportHeight);
+    const bottomVisible = canScroll && remaining > 3;
+
+    setShowTopScrollBlur((prev) => (prev === topVisible ? prev : topVisible));
+    setShowBottomScrollBlur((prev) => (prev === bottomVisible ? prev : bottomVisible));
+  }, []);
+
+  const handleListLayout = useCallback((height: number) => {
+    listViewportHeightRef.current = height;
+    updateScrollEdgeBlur(0);
+  }, [updateScrollEdgeBlur]);
+
+  const handleListContentSizeChange = useCallback((height: number) => {
+    listContentHeightRef.current = height;
+    updateScrollEdgeBlur(0);
+  }, [updateScrollEdgeBlur]);
+
+  const handleListScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      updateScrollEdgeBlur(event.nativeEvent.contentOffset.y);
+    },
+    [updateScrollEdgeBlur],
   );
 
-  const listHeader = useMemo(
-    () => (
+  const handleDeleteReceipt = useCallback(
+    (receipt: ReceiptItem) => {
+      swipeableRefs.current[receipt.id]?.close();
+      setDeletedReceiptIds((prev) => ({ ...prev, [receipt.id]: true }));
+      setReceiptEdits((prev) => {
+        if (!(receipt.id in prev)) return prev;
+        const next = { ...prev };
+        delete next[receipt.id];
+        return next;
+      });
+
+      if (selectedReceipt?.id === receipt.id) {
+        setSelectedReceipt(null);
+        setModalVisible(false);
+      }
+
+      if (!receipt.id.startsWith("db-")) {
+        return;
+      }
+
+      const paymentId = Number(receipt.id.replace("db-", ""));
+      if (!Number.isFinite(paymentId) || paymentId <= 0) {
+        return;
+      }
+
+      void dbExpo.runAsync("DELETE FROM payments WHERE id = ?", [paymentId]).catch((error) => {
+        console.error("Failed to delete receipt:", error);
+        setDeletedReceiptIds((prev) => {
+          if (!prev[receipt.id]) return prev;
+          const next = { ...prev };
+          delete next[receipt.id];
+          return next;
+        });
+        Alert.alert("Delete failed", "Could not delete this spending. Please try again.");
+      });
+    },
+    [dbExpo, selectedReceipt?.id],
+  );
+
+  const keyExtractor = useCallback((item: ReceiptGroup) => item.id, []);
+
+  const renderReceiptGroup = useCallback(
+    ({ item }: { item: ReceiptGroup }) => (
+      <View style={styles.groupWrap}>
+        <Text style={[styles.groupDateLabel, isDark ? styles.groupDateLabelDark : null]}>{item.label}</Text>
+        <View style={[styles.groupCard, isDark ? styles.groupCardDark : null]}>
+          {item.items.map((receipt, index) => {
+            const statusConfig = STATUS_CONFIG[receipt.status] || STATUS_CONFIG.processed;
+            const transactionDateLabel = formatTransactionDateLabel(receipt.fullDate);
+            const isManualEntry = receipt.sourceType === "manual";
+            const categoryColor = receipt.categoryColor ?? "#8E8E93";
+            const categoryIconBg = withAlpha(categoryColor, isDark ? 0.22 : 0.14);
+            const CategoryIcon = resolveCategoryIcon(receipt.categoryIconName, receipt.category);
+
+            return (
+              <View key={receipt.id}>
+                <Swipeable
+                  ref={(instance) => {
+                    swipeableRefs.current[receipt.id] = instance;
+                  }}
+                  friction={2}
+                  rightThreshold={40}
+                  overshootRight={false}
+                  onSwipeableOpen={() => closeOtherSwipeables(receipt.id)}
+                  renderRightActions={() => (
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={() => handleDeleteReceipt(receipt)}
+                      style={styles.deleteAction}
+                    >
+                      <Trash2 size={18} color="#FFFFFF" />
+                    </TouchableOpacity>
+                  )}
+                >
+                  <TouchableOpacity
+                    activeOpacity={0.72}
+                    onPress={() => handleOpenReceipt(receipt)}
+                    style={styles.groupRowPressable}
+                  >
+                    <View style={styles.groupRow}>
+                      <View
+                        style={[
+                          styles.groupIconContainer,
+                          isDark ? styles.groupIconContainerDark : null,
+                          isManualEntry ? { backgroundColor: categoryIconBg, borderColor: withAlpha(categoryColor, 0.45), borderWidth: 1 } : null,
+                        ]}
+                      >
+                        {isManualEntry ? (
+                          <CategoryIcon size={20} color={categoryColor} />
+                        ) : (
+                          <ReceiptText size={20} color={isDark ? "#E5E7EB" : "#111111"} />
+                        )}
+                      </View>
+
+                      <View style={styles.groupTextColumn}>
+                        <Text style={[styles.groupTitleText, isDark ? styles.groupTitleTextDark : null]} numberOfLines={1}>
+                          {receipt.title}
+                        </Text>
+                        <Text style={[styles.groupMetaText, isDark ? styles.groupMetaTextDark : null]} numberOfLines={1}>
+                          {transactionDateLabel}
+                        </Text>
+                      </View>
+
+                      <View style={styles.groupSpacer} />
+
+                      <View style={styles.groupRightColumn}>
+                        <Text style={[styles.groupAmountText, isDark ? styles.groupAmountTextDark : null]}>{receipt.amount}</Text>
+                        <View style={[styles.groupStatusPill, { backgroundColor: statusConfig.bg }]}>
+                          <View style={[styles.groupStatusDot, { backgroundColor: statusConfig.color }]} />
+                          <Text style={[styles.groupStatusText, { color: statusConfig.color }]}>{statusConfig.label}</Text>
+                        </View>
+                      </View>
+                      <ChevronRight size={14} color={isDark ? "#6B7280" : "#B8BDC7"} style={styles.groupChevron} />
+                    </View>
+                  </TouchableOpacity>
+                </Swipeable>
+
+                {index < item.items.length - 1 ? (
+                  <View style={[styles.groupRowDivider, isDark ? styles.groupRowDividerDark : null]} />
+                ) : null}
+              </View>
+            );
+          })}
+        </View>
+      </View>
+    ),
+    [closeOtherSwipeables, handleDeleteReceipt, handleOpenReceipt, isDark],
+  );
+
+  const listHeader = (
+    <>
+      <View style={styles.headerContainer}>
+        <View style={styles.headerTop}>
+          <Text style={[styles.pageTitle, isDark ? styles.pageTitleDark : null]}>History</Text>
+          <TouchableOpacity
+            style={[styles.headerBadge, isDark ? styles.headerBadgeDark : null]}
+            activeOpacity={0.85}
+            onPress={() => setShowMonthPicker(true)}
+          >
+            <View style={styles.headerBadgeDot} />
+            <Text style={[styles.headerBadgeText, isDark ? styles.headerBadgeTextDark : null]}>{currentMonthLabel}</Text>
+            <ChevronDown size={14} color={isDark ? "#E5E7EB" : "#111827"} style={styles.headerBadgeIcon} />
+          </TouchableOpacity>
+        </View>
+
+        <View style={[styles.summaryCard, isDark ? styles.summaryCardDark : null]}>
+          <View style={styles.summaryMain}>
+            <Text style={[styles.summaryLabel, isDark ? styles.summaryLabelDark : null]}>Total Spend</Text>
+            <View style={styles.summaryAmountRow}>
+              <Text style={[styles.summaryAmountCurrency, isDark ? styles.summaryAmountTextDark : null]}>RON</Text>
+              <View style={styles.summaryAmountViewport}>
+                <Text style={[styles.summaryAmountNumber, styles.summaryAmountSizer, isDark ? styles.summaryAmountTextDark : null]}>
+                  {totalSpendSizerText}
+                </Text>
+                {incomingTotalSpendDisplay ? (
+                  <>
+                    <Animated.Text
+                      style={[
+                        styles.summaryAmountNumber,
+                        styles.summaryAmountAnimatedLayer,
+                        isDark ? styles.summaryAmountTextDark : null,
+                        {
+                          opacity: outgoingTotalOpacity,
+                          transform: [{ translateY: outgoingTotalTranslateY }],
+                          textShadowRadius: outgoingTotalBlur,
+                        },
+                      ]}
+                    >
+                      {committedTotalSpendDisplay}
+                    </Animated.Text>
+                    <Animated.Text
+                      style={[
+                        styles.summaryAmountNumber,
+                        styles.summaryAmountAnimatedLayer,
+                        isDark ? styles.summaryAmountTextDark : null,
+                        {
+                          opacity: incomingTotalOpacity,
+                          transform: [{ translateY: incomingTotalTranslateY }],
+                          textShadowRadius: incomingTotalBlur,
+                        },
+                      ]}
+                    >
+                      {incomingTotalSpendDisplay}
+                    </Animated.Text>
+                  </>
+                ) : (
+                  <Text style={[styles.summaryAmountNumber, styles.summaryAmountAnimatedLayer, isDark ? styles.summaryAmountTextDark : null]}>
+                    {committedTotalSpendDisplay}
+                  </Text>
+                )}
+              </View>
+            </View>
+          </View>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => setShowTrendInfo(true)}
+            style={[styles.trendBadge, { backgroundColor: trendBackgroundColor }]}
+          >
+            <TrendIcon size={13} color={trendColor} />
+            <Text
+              numberOfLines={1}
+              style={[styles.trendText, { color: trendColor }]}
+            >
+              {trendLabel}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
       <View style={styles.controlsSection}>
         <View style={[styles.searchBar, isDark ? styles.searchBarDark : null]}>
           <Search size={20} color="#8E8E93" />
           <TextInput
             style={[styles.searchInput, isDark ? styles.searchInputDark : null]}
-            placeholder="Search reports..."
+            placeholder="Search receipts, items, merchants..."
             placeholderTextColor="#8E8E93"
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -684,122 +1092,21 @@ export default function Reports() {
             autoCapitalize="none"
           />
         </View>
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
-          {FILTER_OPTIONS.map((filter) => (
-            <TouchableOpacity
-              key={filter}
-              style={[
-                styles.filterChip,
-                isDark ? styles.filterChipDark : null,
-                activeFilter === filter && styles.filterChipActive,
-              ]}
-              onPress={() => setActiveFilter(filter)}
-            >
-              <Text
-                style={[
-                  styles.filterText,
-                  isDark ? styles.filterTextDark : null,
-                  activeFilter === filter && styles.filterTextActive,
-                ]}
-              >{filter}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
       </View>
-    ),
-    [activeFilter, isDark, searchQuery],
+    </>
   );
 
   return (
     <View style={[styles.background, isDark ? styles.backgroundDark : null]}>
-      <SafeArea style={styles.page}>
-        <View style={styles.headerContainer}>
-          <View style={styles.headerTop}>
-            <Text style={[styles.pageTitle, isDark ? styles.pageTitleDark : null]}>Reports</Text>
-            <TouchableOpacity
-             
-              style={[styles.headerBadge, isDark ? styles.headerBadgeDark : null]}
-             
-              activeOpacity={0.85}
-             
-              onPress={() => setShowMonthPicker(true)}
-            
-            >
-              <View style={styles.headerBadgeDot} />
-              <Text style={[styles.headerBadgeText, isDark ? styles.headerBadgeTextDark : null]}>{currentMonthLabel}</Text>
-              <ChevronDown size={14} color={isDark ? "#E5E7EB" : "#111827"} style={styles.headerBadgeIcon} />
-            </TouchableOpacity>
-          </View>
-
-          <View style={[styles.summaryCard, isDark ? styles.summaryCardDark : null]}>
-            <View style={styles.summaryMain}>
-              <Text style={[styles.summaryLabel, isDark ? styles.summaryLabelDark : null]}>Total Spend</Text>
-              <View style={styles.summaryAmountRow}>
-                <Text style={[styles.summaryAmountCurrency, isDark ? styles.summaryAmountTextDark : null]}>RON</Text>
-                <View style={styles.summaryAmountViewport}>
-                  <Text style={[styles.summaryAmountNumber, styles.summaryAmountSizer, isDark ? styles.summaryAmountTextDark : null]}>
-                    {totalSpendSizerText}
-                  </Text>
-                  {incomingTotalSpendDisplay ? (
-                    <>
-                      <Animated.Text
-                        style={[
-                          styles.summaryAmountNumber,
-                          styles.summaryAmountAnimatedLayer,
-                          isDark ? styles.summaryAmountTextDark : null,
-                          {
-                            opacity: outgoingTotalOpacity,
-                            transform: [{ translateY: outgoingTotalTranslateY }],
-                            textShadowRadius: outgoingTotalBlur,
-                          },
-                        ]}
-                      >
-                        {committedTotalSpendDisplay}
-                      </Animated.Text>
-                      <Animated.Text
-                        style={[
-                          styles.summaryAmountNumber,
-                          styles.summaryAmountAnimatedLayer,
-                          isDark ? styles.summaryAmountTextDark : null,
-                          {
-                            opacity: incomingTotalOpacity,
-                            transform: [{ translateY: incomingTotalTranslateY }],
-                            textShadowRadius: incomingTotalBlur,
-                          },
-                        ]}
-                      >
-                        {incomingTotalSpendDisplay}
-                      </Animated.Text>
-                    </>
-                  ) : (
-                    <Text style={[styles.summaryAmountNumber, styles.summaryAmountAnimatedLayer, isDark ? styles.summaryAmountTextDark : null]}>
-                      {committedTotalSpendDisplay}
-                    </Text>
-                  )}
-                </View>
-              </View>
-            </View>
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => setShowTrendInfo(true)}
-              style={[styles.trendBadge, { backgroundColor: trendBackgroundColor }]}
-            >
-              <TrendIcon size={13} color={trendColor} />
-              <Text
-                numberOfLines={1}
-                style={[styles.trendText, { color: trendColor }]}
-              >
-                {trendLabel}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
+      <View style={styles.page}>
         <FlashList
-          data={filteredReceipts}
+          data={groupedReceipts}
           keyExtractor={keyExtractor}
-          renderItem={renderReceiptItem}
+          renderItem={renderReceiptGroup}
+          onLayout={(event) => handleListLayout(event.nativeEvent.layout.height)}
+          onContentSizeChange={(_width, height) => handleListContentSizeChange(height)}
+          onScroll={handleListScroll}
+          scrollEventThrottle={16}
           contentContainerStyle={styles.listContent}
           ListHeaderComponent={listHeader}
           ListEmptyComponent={
@@ -808,7 +1115,26 @@ export default function Reports() {
             </View>
           }
         />
-      </SafeArea>
+
+        <LinearGradient
+          pointerEvents="none"
+          colors={
+            isDark
+              ? ["rgba(0,0,0,0.9)", "rgba(0,0,0,0)"]
+              : ["rgba(248,249,250,0.96)", "rgba(248,249,250,0)"]
+          }
+          style={[styles.scrollBlurTop, !showTopScrollBlur ? styles.scrollBlurHidden : null]}
+        />
+        <LinearGradient
+          pointerEvents="none"
+          colors={
+            isDark
+              ? ["rgba(0,0,0,0)", "rgba(0,0,0,0.9)"]
+              : ["rgba(248,249,250,0)", "rgba(248,249,250,0.96)"]
+          }
+          style={[styles.scrollBlurBottom, !showBottomScrollBlur ? styles.scrollBlurHidden : null]}
+        />
+      </View>
 
       <ReceiptDetailModal
         visible={modalVisible}
@@ -884,19 +1210,37 @@ export default function Reports() {
 // --- STYLES (Main list) ---
 const styles = StyleSheet.create({
   background: { flex: 1, backgroundColor: "#F8F9FA" },
-  backgroundDark: { backgroundColor: "#0B0F14" },
+  backgroundDark: { backgroundColor: "#000000" },
   headerContainer: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 14,
     paddingTop: 6,
     paddingBottom: 10,
-    marginBottom: 14,
+    marginBottom: 8,
   },
-  page: { flex: 1 },
+  page: { flex: 1, paddingTop: 8 },
+  scrollBlurTop: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 100,
+  },
+  scrollBlurBottom: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 100,
+  },
+  scrollBlurHidden: {
+    opacity: 0,
+  },
   headerTop: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 18,
-    paddingHorizontal: 20,
+    justifyContent: "space-between",
+    marginBottom: 8,
+    marginTop: 50,
   },
   pageEyebrow: {
     fontSize: 12,
@@ -907,13 +1251,14 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: 14,
   },
-  pageTitle: { fontSize: 32, fontWeight: "900", color: "#111827", letterSpacing: -0.8 },
+  pageTitle: { fontSize: 34, fontWeight: "900", color: "#111827", letterSpacing: -0.8},
   pageTitleDark: {
     color: "#F9FAFB",
   },
   headerBadge: {
     flexDirection: "row",
     alignItems: "center",
+    marginLeft: 32,
     backgroundColor: "#fff",
     borderWidth: 1,
     borderColor: "#E5E7EB",
@@ -922,8 +1267,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   headerBadgeDark: {
-    backgroundColor: "#111827",
-    borderColor: "#374151",
+    backgroundColor: "#050505",
+    borderColor: "#262626",
   },
   headerBadgeDot: {
     width: 8,
@@ -944,8 +1289,8 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
   summaryCard: {
-    width: "95%",
-    alignSelf: "center",
+    width: "100%",
+    alignSelf: "stretch",
     backgroundColor: "#fff",
     borderRadius: 24,
     padding: 24,
@@ -959,9 +1304,9 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   summaryCardDark: {
-    backgroundColor: "#111827",
+    backgroundColor: "#050505",
     borderWidth: 1,
-    borderColor: "#374151",
+    borderColor: "#262626",
   },
   summaryMain: {
     flex: 1,
@@ -1146,44 +1491,142 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 
-  controlsSection: { paddingHorizontal: 20, marginBottom: 10 },
+  controlsSection: { paddingHorizontal: 14, marginBottom: 4 },
   searchBar: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#fff",
-    paddingHorizontal: 16,
-    height: 50,
-    borderRadius: 14,
-    marginBottom: 16,
+    paddingHorizontal: 12,
+    height: 46,
+    borderRadius: 999,
+    marginBottom: 5,
     borderWidth: 1,
     borderColor: "#F0F0F0",
   },
   searchBarDark: {
-    backgroundColor: "#111827",
-    borderColor: "#374151",
+    backgroundColor: "#050505",
+    borderColor: "#262626",
   },
-  searchInput: { flex: 1, marginLeft: 10, fontSize: 16, color: "#1A1A1A" },
+  searchInput: { flex: 1, marginLeft: 8, fontSize: 16, color: "#1A1A1A" },
   searchInputDark: { color: "#F3F4F6" },
-  filterScroll: { paddingRight: 20 },
-  filterChip: {
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    backgroundColor: "#fff",
-    borderRadius: 100,
-    marginRight: 10,
+  groupWrap: {
+    paddingHorizontal: 14,
+    marginBottom: 14,
+  },
+  groupDateLabel: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#6B7280",
+    marginBottom: 8,
+    marginLeft: 15,
+  },
+  groupDateLabelDark: {
+    color: "#9CA3AF",
+  },
+  groupCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: "#E5E5EA",
+    borderColor: "#F2F2F7",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 2,
+    overflow: "hidden",
   },
-  filterChipDark: {
-    backgroundColor: "#111827",
-    borderColor: "#374151",
+  groupCardDark: {
+    backgroundColor: "#050505",
+    borderColor: "#262626",
   },
-  filterChipActive: { backgroundColor: "#1A1A1A", borderColor: "#1A1A1A" },
-  filterText: { fontSize: 14, fontWeight: "600", color: "#1A1A1A" },
-  filterTextDark: { color: "#E5E7EB" },
-  filterTextActive: { color: "#fff" },
+  groupRowPressable: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  groupRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  groupIconContainer: {
+    width: 48,
+    height: 48,
+    backgroundColor: "#F5F5F5",
+    borderRadius: 14,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 16,
+    overflow: "hidden",
+  },
+  groupIconContainerDark: {
+    backgroundColor: "#0D0D0D",
+  },
+  groupTextColumn: {
+    justifyContent: "center",
+    flexShrink: 1,
+  },
+  groupTitleText: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#1A1A1A",
+    marginBottom: 4,
+  },
+  groupTitleTextDark: {
+    color: "#F9FAFB",
+  },
+  groupMetaText: {
+    fontSize: 11,
+    fontWeight: "500",
+    color: "#8E8E93",
+  },
+  groupMetaTextDark: {
+    color: "#9CA3AF",
+  },
+  groupSpacer: {
+    flex: 1,
+  },
+  groupRightColumn: {
+    alignItems: "flex-end",
+    gap: 6,
+    marginLeft: 12,
+  },
+  groupChevron: {
+    marginLeft: 10,
+  },
+  groupAmountText: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#1A1A1A",
+  },
+  groupAmountTextDark: {
+    color: "#F9FAFB",
+  },
+  groupStatusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  groupStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 6,
+  },
+  groupStatusText: {
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  groupRowDivider: {
+    height: 1,
+    backgroundColor: "#ECEFF3",
+    marginHorizontal: 16,
+  },
+  groupRowDividerDark: {
+    backgroundColor: "#1A1A1A",
+  },
 
-  listContent: { paddingTop: 10, paddingBottom: 100 },
+  listContent: { paddingTop: 4, paddingBottom: 100 },
   emptyStateWrap: {
     paddingVertical: 28,
     paddingHorizontal: 20,
@@ -1200,5 +1643,3 @@ const styles = StyleSheet.create({
     color: "#9CA3AF",
   },
 });
-
-

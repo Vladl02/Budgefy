@@ -1,86 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Alert,
-  Animated,
-  Image,
-  Linking,
-  Modal,
-  PanResponder,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from "react-native";
-import * as Haptics from "expo-haptics";
-import * as ImagePicker from "expo-image-picker";
-import {
-  AlertTriangle,
-  ArrowLeft,
-  Calendar as CalendarIcon,
-  Check,
-  CheckCircle2,
-  ChevronRight,
-  Clock3,
-  Info,
-  ReceiptText,
-  X,
-} from "lucide-react-native";
+import React from "react";
+import { Nunito_900Black } from "@expo-google-fonts/nunito";
+import { useFonts } from "expo-font";
+import { Animated, Image, Modal, PanResponder, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import DateTimePicker, { DateTimePickerAndroid } from "@react-native-community/datetimepicker";
+import { Calendar, Check, ChevronDown, ChevronRight, Coins, MapPin, Trash2, X } from "lucide-react-native";
+import { useSQLiteContext } from "expo-sqlite";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { STATUS_CONFIG } from "./constants";
 import type { ReceiptItem } from "./types";
-import { SelectionModal } from "./SelectionModal";
-import { SimpleDatePickerModal } from "./SimpleDatePickerModal";
-
-const CURRENCY_OPTIONS = ["USD", "EUR", "RON", "GBP"];
-const DATE_METHOD_SEPARATOR = " - ";
-
-const parseAmountInput = (rawAmount: string): number => {
-  const sanitized = rawAmount.replace(/\s/g, "").replace(/[^\d,.-]/g, "");
-  if (!sanitized) return 0;
-
-  const lastComma = sanitized.lastIndexOf(",");
-  const lastDot = sanitized.lastIndexOf(".");
-  let normalized = sanitized;
-
-  if (lastComma >= 0 && lastDot >= 0) {
-    if (lastComma > lastDot) {
-      normalized = sanitized.replace(/\./g, "").replace(",", ".");
-    } else {
-      normalized = sanitized.replace(/,/g, "");
-    }
-  } else if (lastComma >= 0) {
-    normalized = sanitized.replace(",", ".");
-  }
-
-  const parsed = Number.parseFloat(normalized);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
-
-const parseDateOnly = (value: string): Date | null => {
-  if (!value) return null;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    const [yearRaw, monthRaw, dayRaw] = value.split("-");
-    const year = Number.parseInt(yearRaw, 10);
-    const month = Number.parseInt(monthRaw, 10);
-    const day = Number.parseInt(dayRaw, 10);
-    const parsed = new Date(year, month - 1, day);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
-  }
-
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-};
-
-const formatIsoDate = (date: Date): string => {
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-};
 
 type ReceiptDetailModalProps = {
   visible: boolean;
@@ -91,632 +18,870 @@ type ReceiptDetailModalProps = {
   onSave: (updatedItem: ReceiptItem) => void;
 };
 
-function ReceiptDetailModal({
-  visible,
-  item,
-  categoryOptions,
-  categoryAccentMap,
-  onClose,
-  onSave,
-}: ReceiptDetailModalProps) {
+type ReceiptLineItem = {
+  id: string;
+  dbProductId: number | null;
+  name: string;
+  amountLabel: string;
+  totalValue: number;
+  quantity: string;
+  unit: string;
+  categoryName: string;
+  categoryColor: string;
+};
+
+const withAlpha = (hexColor: string, alpha: number): string => {
+  const normalized = (hexColor || "").replace("#", "").trim();
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) {
+    return `rgba(17, 24, 39, ${alpha})`;
+  }
+
+  const r = Number.parseInt(normalized.slice(0, 2), 16);
+  const g = Number.parseInt(normalized.slice(2, 4), 16);
+  const b = Number.parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
+const formatDatePillValue = (rawDate: Date | string | null | undefined): string => {
+  if (!rawDate) return "5 Mar 2026";
+  const parsed =
+    rawDate instanceof Date
+      ? rawDate
+      : /^\d{4}-\d{2}-\d{2}$/.test(rawDate)
+        ? new Date(
+            Number.parseInt(rawDate.slice(0, 4), 10),
+            Number.parseInt(rawDate.slice(5, 7), 10) - 1,
+            Number.parseInt(rawDate.slice(8, 10), 10),
+          )
+        : new Date(rawDate);
+  if (Number.isNaN(parsed.getTime())) return "5 Mar 2026";
+  const day = parsed.getDate();
+  const month = parsed.toLocaleDateString("en-US", { month: "short" });
+  const year = parsed.getFullYear();
+  return `${day} ${month} ${year}`;
+};
+
+const formatTimePillValue = (rawDate: Date | string | null | undefined): string => {
+  if (!rawDate) return "00:00";
+  const parsed = rawDate instanceof Date ? rawDate : new Date(rawDate);
+  if (Number.isNaN(parsed.getTime())) return "00:00";
+  const hours = String(parsed.getHours()).padStart(2, "0");
+  const minutes = String(parsed.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+};
+
+const parseEditableDateTime = (dateLabel: string, timeLabel: string): Date => {
+  const now = new Date();
+  const monthLookup: Record<string, number> = {
+    jan: 0,
+    feb: 1,
+    mar: 2,
+    apr: 3,
+    may: 4,
+    jun: 5,
+    jul: 6,
+    aug: 7,
+    sep: 8,
+    oct: 9,
+    nov: 10,
+    dec: 11,
+  };
+
+  let year = now.getFullYear();
+  let month = now.getMonth();
+  let day = now.getDate();
+  const dateMatch = dateLabel.trim().match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/);
+  if (dateMatch) {
+    const parsedDay = Number.parseInt(dateMatch[1], 10);
+    const parsedMonth = monthLookup[dateMatch[2].toLowerCase()];
+    const parsedYear = Number.parseInt(dateMatch[3], 10);
+    if (
+      Number.isFinite(parsedDay) &&
+      Number.isFinite(parsedMonth) &&
+      Number.isFinite(parsedYear) &&
+      parsedDay >= 1 &&
+      parsedDay <= 31
+    ) {
+      day = parsedDay;
+      month = parsedMonth;
+      year = parsedYear;
+    }
+  }
+
+  let hours = now.getHours();
+  let minutes = now.getMinutes();
+  const timeMatch = timeLabel.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (timeMatch) {
+    const parsedHours = Number.parseInt(timeMatch[1], 10);
+    const parsedMinutes = Number.parseInt(timeMatch[2], 10);
+    if (parsedHours >= 0 && parsedHours <= 23) {
+      hours = parsedHours;
+    }
+    if (parsedMinutes >= 0 && parsedMinutes <= 59) {
+      minutes = parsedMinutes;
+    }
+  }
+
+  const parsed = new Date(year, month, day, hours, minutes, 0, 0);
+  return Number.isNaN(parsed.getTime()) ? now : parsed;
+};
+
+const parseAmountFromLabel = (rawAmountLabel: string): number => {
+  const sanitized = rawAmountLabel.replace(/\s/g, "").replace(/[^\d,.-]/g, "");
+  if (!sanitized) return 0;
+  const normalized = sanitized.includes(",") ? sanitized.replace(",", ".") : sanitized;
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap, onClose }: ReceiptDetailModalProps) {
+  const [fontsLoaded] = useFonts({
+    Nunito_900Black,
+  });
+  const db = useSQLiteContext();
   const insets = useSafeAreaInsets();
-  const sheetTranslateY = useRef(new Animated.Value(0)).current;
-  const [name, setName] = useState("");
-  const [dateVal, setDateVal] = useState("");
-  const [price, setPrice] = useState("");
-  const [currency, setCurrency] = useState("USD");
-  const [category, setCategory] = useState("Uncategorized");
-  const [isFullPage, setIsFullPage] = useState(false);
-  const [comment, setComment] = useState("");
-  const [receiptPhotoUri, setReceiptPhotoUri] = useState<string | null>(null);
-  const [showReceiptPreview, setShowReceiptPreview] = useState(false);
-  const [previewPhotoUri, setPreviewPhotoUri] = useState<string | null>(null);
+  const hasImage = Boolean(item?.receiptPhotoUri);
+  const currencyValue = item?.currency ?? "RON";
+  const [editableDate, setEditableDate] = React.useState("5 Mar 2026");
+  const [editableTime, setEditableTime] = React.useState("00:00");
+  const [showDatePickerModal, setShowDatePickerModal] = React.useState(false);
+  const [pendingDatePickerValue, setPendingDatePickerValue] = React.useState(new Date());
+  const [showTimePickerModal, setShowTimePickerModal] = React.useState(false);
+  const [pendingTimePickerValue, setPendingTimePickerValue] = React.useState(new Date());
+  const [receiptItems, setReceiptItems] = React.useState<ReceiptLineItem[]>([]);
+  const [showEditItemModal, setShowEditItemModal] = React.useState(false);
+  const [selectedLineItem, setSelectedLineItem] = React.useState<ReceiptLineItem | null>(null);
+  const [editItemName, setEditItemName] = React.useState("");
+  const [editItemQuantity, setEditItemQuantity] = React.useState("1");
+  const [editItemUnit, setEditItemUnit] = React.useState("pcs");
+  const [editItemTotalPrice, setEditItemTotalPrice] = React.useState("0.00");
+  const [editItemCategory, setEditItemCategory] = React.useState("");
+  const [showEditItemCategoryOptions, setShowEditItemCategoryOptions] = React.useState(false);
+  const editItemSheetTranslateY = React.useRef(new Animated.Value(900)).current;
+  const editItemCategoryOptions = React.useMemo(() => {
+    const seen = new Set<string>();
+    const normalized = categoryOptions.reduce<string[]>((acc, rawOption) => {
+      const option = rawOption.trim();
+      if (!option) return acc;
+      const key = option.toLowerCase();
+      if (seen.has(key)) return acc;
+      seen.add(key);
+      acc.push(option);
+      return acc;
+    }, []);
 
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
-  const [showCategoryPicker, setShowCategoryPicker] = useState(false);
-  const [showStatusInfo, setShowStatusInfo] = useState(false);
-
-  useEffect(() => {
-    if (item) {
-      setName(item.title);
-      const parsedPrice = parseAmountInput(item.amount);
-      setPrice(parsedPrice > 0 ? parsedPrice.toString() : "");
-      const detectedCurrency = item.currency || (item.amount.includes("RON") ? "RON" : "USD");
-      setCurrency(detectedCurrency);
-      setDateVal(item.fullDate || formatIsoDate(new Date()));
-      setCategory(item.category || "General");
-      setIsFullPage(item.fullPage || false);
-      setComment(item.comment || "");
-      setReceiptPhotoUri(item.receiptPhotoUri ?? null);
+    const current = editItemCategory.trim();
+    if (current && !seen.has(current.toLowerCase())) {
+      normalized.unshift(current);
     }
-  }, [item, visible]);
-  useEffect(() => {
-    if (visible) {
-      sheetTranslateY.setValue(0);
-    }
-  }, [visible, sheetTranslateY]);
 
-  const statusConfig =
-    STATUS_CONFIG[(item?.status as keyof typeof STATUS_CONFIG) ?? "processed"] ?? STATUS_CONFIG.processed;
-
-  const isValid = useMemo(() => {
-    const num = parseAmountInput(price);
-    return name.trim().length > 0 && !Number.isNaN(num) && num >= 0 && !!dateVal;
-  }, [name, price, dateVal]);
-  const dateDisplay = useMemo(() => {
-    const parsed = parseDateOnly(dateVal);
-    if (!parsed) {
-      return { primary: dateVal || "Select date", secondary: "Tap to choose" };
+    if (normalized.length === 0) {
+      normalized.push("General");
     }
-    return {
-      primary: parsed.toLocaleDateString("en-US", { month: "long", day: "numeric" }),
-      secondary: parsed.toLocaleDateString("en-US", { weekday: "short", year: "numeric" }),
+    return normalized;
+  }, [categoryOptions, editItemCategory]);
+
+  React.useEffect(() => {
+    if (!visible) return;
+    const formattedDate = formatDatePillValue(item?.fullDate);
+    const formattedTime = formatTimePillValue(item?.fullDate);
+    setEditableDate(formattedDate);
+    setEditableTime(formattedTime);
+    const initialDateTime = parseEditableDateTime(formattedDate, formattedTime);
+    setPendingDatePickerValue(initialDateTime);
+    setPendingTimePickerValue(initialDateTime);
+  }, [item?.fullDate, visible]);
+  React.useEffect(() => {
+    if (!visible) {
+      setShowDatePickerModal(false);
+      setShowTimePickerModal(false);
+      setShowEditItemModal(false);
+      setSelectedLineItem(null);
+      setEditItemName("");
+      setEditItemQuantity("1");
+      setEditItemUnit("pcs");
+      setEditItemTotalPrice("0.00");
+      setEditItemCategory("");
+      setShowEditItemCategoryOptions(false);
+      editItemSheetTranslateY.setValue(900);
+    }
+  }, [editItemSheetTranslateY, visible]);
+
+  React.useEffect(() => {
+    let isCancelled = false;
+
+    const setFallbackItem = () => {
+      const fallbackCategory = item?.category || "General";
+      const fallbackCategoryColor = categoryAccentMap[fallbackCategory] ?? "#6B7280";
+      const fallback: ReceiptLineItem[] = item
+        ? [
+            {
+              id: `fallback-${item.id}`,
+              dbProductId: null,
+              name: item.title || "Item",
+              amountLabel: item.amount || `${currencyValue} 0.00`,
+              totalValue: parseAmountFromLabel(item.amount || ""),
+              quantity: "1",
+              unit: "pcs",
+              categoryName: fallbackCategory,
+              categoryColor: fallbackCategoryColor,
+            },
+          ]
+        : [];
+      if (!isCancelled) {
+        setReceiptItems(fallback);
+      }
     };
-  }, [dateVal]);
-  const selectedCategoryColor = categoryAccentMap[category] ?? "#D1D5DB";
 
-  const handleSave = () => {
-    if (!item) {
-      return;
-    }
-
-    const numericPrice = parseAmountInput(price);
-    const formattedAmount = `${currency} ${numericPrice.toFixed(2)}`;
-
-    const dateObj = parseDateOnly(dateVal) ?? new Date();
-    const shortDate = dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    const normalizedFullDate = formatIsoDate(dateObj);
-
-    const updatedItem: ReceiptItem = {
-      ...item,
-      title: name,
-      fullDate: normalizedFullDate,
-      date: `${shortDate}${DATE_METHOD_SEPARATOR}${currency}`,
-      amount: formattedAmount,
-      currency,
-      category,
-      fullPage: isFullPage,
-      comment,
-      receiptPhotoUri,
-      status: item.status,
-    };
-
-    onSave(updatedItem);
-  };
-  const promptOpenSettings = (title: string, message: string) => {
-    Alert.alert(title, message, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Open Settings",
-        onPress: () => {
-          void Linking.openSettings();
-        },
-      },
-    ]);
-  };
-  const notifySuccess = () =>
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
-
-  const pickReceiptPhoto = async (source: "camera" | "gallery"): Promise<string | null> => {
-    if (source === "camera") {
-      const permission = await ImagePicker.requestCameraPermissionsAsync();
-      if (permission.status !== "granted") {
-        promptOpenSettings("Camera access needed", "Please allow camera access to take a receipt photo.");
-        return null;
+    const loadItems = async () => {
+      if (!visible || !item) {
+        if (!isCancelled) {
+          setReceiptItems([]);
+        }
+        return;
       }
 
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: false,
-        quality: 0.75,
+      if (!item.id.startsWith("db-")) {
+        setFallbackItem();
+        return;
+      }
+
+      const paymentId = Number(item.id.replace("db-", ""));
+      if (!Number.isFinite(paymentId) || paymentId <= 0) {
+        setFallbackItem();
+        return;
+      }
+
+      try {
+        const rows = await db.getAllAsync<{
+          id: number;
+          name: string;
+          price: number;
+          categoryName: string | null;
+          categoryColor: string | null;
+        }>(
+          `SELECT p.id AS id,
+                  p.name AS name,
+                  p.price AS price,
+                  c.category_name AS categoryName,
+                  c.color AS categoryColor
+           FROM products p
+           LEFT JOIN categories c ON c.id = p.category_id
+           WHERE payment_id = ?
+           ORDER BY p.id ASC`,
+          [paymentId],
+        );
+
+        const mapped = rows.map((row) => ({
+          id: `product-${row.id}`,
+          dbProductId: row.id,
+          name: row.name?.trim() || "Unnamed item",
+          amountLabel: `${currencyValue} ${(Number(row.price ?? 0) / 100).toFixed(2)}`,
+          totalValue: Number(row.price ?? 0) / 100,
+          quantity: "1",
+          unit: "pcs",
+          categoryName: row.categoryName?.trim() || item.category || "General",
+          categoryColor:
+            row.categoryColor?.trim() ||
+            categoryAccentMap[row.categoryName?.trim() || ""] ||
+            categoryAccentMap[item.category] ||
+            "#6B7280",
+        }));
+
+        if (!isCancelled) {
+          setReceiptItems(mapped.length > 0 ? mapped : []);
+        }
+      } catch {
+        setFallbackItem();
+      }
+    };
+
+    void loadItems();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [categoryAccentMap, currencyValue, db, item, visible]);
+
+  const receiptDateTime = `${editableDate.toLowerCase()} at ${editableTime}`;
+  const openNativeDatePicker = React.useCallback(() => {
+    const initialValue = parseEditableDateTime(editableDate, editableTime);
+    if (Platform.OS === "android") {
+      DateTimePickerAndroid.open({
+        mode: "date",
+        value: initialValue,
+        is24Hour: true,
+        onChange: (_event, selectedDate) => {
+          if (!selectedDate) return;
+          setEditableDate(formatDatePillValue(selectedDate));
+          setPendingDatePickerValue(selectedDate);
+        },
       });
-      return !result.canceled && result.assets.length > 0 ? result.assets[0].uri : null;
-    }
-
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (permission.status !== "granted") {
-      promptOpenSettings("Photo access needed", "Please allow photo library access to attach a receipt.");
-      return null;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: false,
-      quality: 0.85,
-    });
-    return !result.canceled && result.assets.length > 0 ? result.assets[0].uri : null;
-  };
-
-  const updateReceiptPhoto = async (source: "camera" | "gallery") => {
-    const uri = await pickReceiptPhoto(source);
-    if (uri) {
-      setReceiptPhotoUri(uri);
-      await notifySuccess();
-    }
-  };
-
-  const updatePreviewPhoto = async (source: "camera" | "gallery") => {
-    const uri = await pickReceiptPhoto(source);
-    if (uri) {
-      setPreviewPhotoUri(uri);
-      await notifySuccess();
-    }
-  };
-
-  const handleReceiptPress = () => {
-    void Haptics.selectionAsync().catch(() => undefined);
-
-    if (!receiptPhotoUri) {
-      Alert.alert("Add Receipt", "Choose how you want to attach the receipt.", [
-        { text: "Cancel", style: "cancel" },
-        { text: "Take Photo", onPress: () => void updateReceiptPhoto("camera") },
-        { text: "Choose from Gallery", onPress: () => void updateReceiptPhoto("gallery") },
-      ]);
       return;
     }
 
-    setPreviewPhotoUri(receiptPhotoUri);
-    setShowReceiptPreview(true);
-  };
-  const closeWithDrag = useCallback(() => {
-    Animated.timing(sheetTranslateY, {
-      toValue: 700,
-      duration: 180,
+    setPendingDatePickerValue(initialValue);
+    setShowDatePickerModal(true);
+  }, [editableDate, editableTime]);
+  const confirmIosDatePicker = React.useCallback(() => {
+    setEditableDate(formatDatePillValue(pendingDatePickerValue));
+    setShowDatePickerModal(false);
+  }, [pendingDatePickerValue]);
+  const openNativeTimePicker = React.useCallback(() => {
+    const initialValue = parseEditableDateTime(editableDate, editableTime);
+    if (Platform.OS === "android") {
+      DateTimePickerAndroid.open({
+        mode: "time",
+        value: initialValue,
+        is24Hour: true,
+        onChange: (_event, selectedDate) => {
+          if (!selectedDate) return;
+          setEditableTime(formatTimePillValue(selectedDate));
+          setPendingTimePickerValue(selectedDate);
+        },
+      });
+      return;
+    }
+
+    setPendingTimePickerValue(initialValue);
+    setShowTimePickerModal(true);
+  }, [editableDate, editableTime]);
+  const confirmIosTimePicker = React.useCallback(() => {
+    setEditableTime(formatTimePillValue(pendingTimePickerValue));
+    setShowTimePickerModal(false);
+  }, [pendingTimePickerValue]);
+  const closeEditItemModal = React.useCallback(() => {
+    Animated.timing(editItemSheetTranslateY, {
+      toValue: 900,
+      duration: 220,
       useNativeDriver: true,
-    }).start(() => onClose());
-  }, [onClose, sheetTranslateY]);
-  const springBackAfterDrag = useCallback(() => {
-    Animated.spring(sheetTranslateY, {
+    }).start(() => {
+      setShowEditItemModal(false);
+      setSelectedLineItem(null);
+      setEditItemName("");
+      setEditItemQuantity("1");
+      setEditItemUnit("pcs");
+      setEditItemTotalPrice("0.00");
+      setEditItemCategory("");
+      setShowEditItemCategoryOptions(false);
+    });
+  }, [editItemSheetTranslateY]);
+  const springBackEditItemModal = React.useCallback(() => {
+    Animated.spring(editItemSheetTranslateY, {
       toValue: 0,
       useNativeDriver: true,
-      speed: 20,
+      speed: 22,
       bounciness: 5,
     }).start();
-  }, [sheetTranslateY]);
-  const dragResponder = useMemo(
+  }, [editItemSheetTranslateY]);
+  const handleSaveEditedItem = React.useCallback(() => {
+    if (!selectedLineItem) return;
+
+    const normalizedName = editItemName.trim() || "Unnamed item";
+    const normalizedQuantity = editItemQuantity.trim() || "1";
+    const normalizedUnit = editItemUnit.trim() || "pcs";
+    const parsedTotal = Number.parseFloat(editItemTotalPrice.replace(",", "."));
+    const safeTotal = Number.isFinite(parsedTotal) && parsedTotal >= 0 ? parsedTotal : 0;
+    const updatedAmountLabel = `${currencyValue} ${safeTotal.toFixed(2)}`;
+    const normalizedCategory =
+      editItemCategory.trim() ||
+      selectedLineItem.categoryName ||
+      categoryOptions[0]?.trim() ||
+      item?.category?.trim() ||
+      "General";
+    const updatedCategoryColor =
+      categoryAccentMap[normalizedCategory] || selectedLineItem.categoryColor || categoryAccentMap[item?.category || ""] || "#6B7280";
+
+    setReceiptItems((prev) =>
+      prev.map((lineItem) =>
+        lineItem.id === selectedLineItem.id
+          ? {
+              ...lineItem,
+              name: normalizedName,
+              quantity: normalizedQuantity,
+              unit: normalizedUnit,
+              totalValue: safeTotal,
+              amountLabel: updatedAmountLabel,
+              categoryName: normalizedCategory,
+              categoryColor: updatedCategoryColor,
+            }
+          : lineItem,
+      ),
+    );
+
+    if (selectedLineItem.dbProductId) {
+      const totalCents = Math.max(0, Math.round((safeTotal + Number.EPSILON) * 100));
+      void db
+        .runAsync(
+          `UPDATE products
+           SET name = ?,
+               price = ?,
+               category_id = COALESCE(
+                 (SELECT id FROM categories WHERE category_name = ? ORDER BY id DESC LIMIT 1),
+                 category_id
+               )
+           WHERE id = ?`,
+          [
+          normalizedName,
+          totalCents,
+          normalizedCategory,
+          selectedLineItem.dbProductId,
+          ],
+        )
+        .catch((error) => {
+          console.error("Failed to update item:", error);
+        });
+    }
+
+    closeEditItemModal();
+  }, [
+    closeEditItemModal,
+    currencyValue,
+    db,
+    categoryAccentMap,
+    categoryOptions,
+    editItemCategory,
+    editItemName,
+    editItemQuantity,
+    editItemTotalPrice,
+    editItemUnit,
+    item?.category,
+    selectedLineItem,
+  ]);
+  const handleDeleteEditedItem = React.useCallback(() => {
+    if (!selectedLineItem) return;
+
+    setReceiptItems((prev) => prev.filter((lineItem) => lineItem.id !== selectedLineItem.id));
+
+    if (selectedLineItem.dbProductId) {
+      void db
+        .runAsync(`DELETE FROM products WHERE id = ?`, [selectedLineItem.dbProductId])
+        .catch((error) => {
+          console.error("Failed to delete item:", error);
+        });
+    }
+
+    closeEditItemModal();
+  }, [closeEditItemModal, db, selectedLineItem]);
+  const openEditItemModal = (lineItem: ReceiptLineItem) => {
+    setEditItemName(lineItem.name);
+    setEditItemQuantity(lineItem.quantity);
+    setEditItemUnit(lineItem.unit);
+    setEditItemTotalPrice(lineItem.totalValue.toFixed(2));
+    setEditItemCategory(lineItem.categoryName);
+    setShowEditItemCategoryOptions(false);
+    setSelectedLineItem(lineItem);
+    setShowEditItemModal(true);
+    editItemSheetTranslateY.setValue(900);
+    requestAnimationFrame(() => {
+      Animated.timing(editItemSheetTranslateY, {
+        toValue: 0,
+        duration: 260,
+        useNativeDriver: true,
+      }).start();
+    });
+  };
+  const editItemDragResponder = React.useMemo(
     () =>
       PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
         onMoveShouldSetPanResponder: (_, gestureState) =>
-          gestureState.dy > 3 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 0.7,
+          gestureState.dy > 2 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.1,
         onMoveShouldSetPanResponderCapture: (_, gestureState) =>
-          gestureState.dy > 3 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 0.7,
+          gestureState.dy > 2 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.1,
+        onPanResponderTerminationRequest: () => false,
         onPanResponderMove: (_, gestureState) => {
           if (gestureState.dy > 0) {
-            sheetTranslateY.setValue(gestureState.dy);
+            editItemSheetTranslateY.setValue(gestureState.dy);
           }
         },
         onPanResponderRelease: (_, gestureState) => {
-          if (gestureState.dy > 80 || gestureState.vy > 0.9) {
-            closeWithDrag();
+          if (gestureState.dy > 105 || gestureState.vy > 0.95) {
+            closeEditItemModal();
             return;
           }
-          springBackAfterDrag();
+          springBackEditItemModal();
         },
         onPanResponderTerminate: () => {
-          springBackAfterDrag();
+          springBackEditItemModal();
         },
       }),
-    [closeWithDrag, sheetTranslateY, springBackAfterDrag],
+    [closeEditItemModal, editItemSheetTranslateY, springBackEditItemModal],
   );
 
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="fullScreen"
-      allowSwipeDismissal
-      onRequestClose={onClose}
-    >
-      <Animated.View style={[editStyles.container, { transform: [{ translateY: sheetTranslateY }] }]}>
-        {/* Header */}
-        <View style={[editStyles.header, { paddingTop: insets.top }]} {...dragResponder.panHandlers}>
-          <TouchableOpacity onPress={onClose} style={editStyles.headerIconBtn}>
-            <ArrowLeft color="#111" size={20} />
-          </TouchableOpacity>
-
-          <View style={editStyles.headerTitleWrap}>
-            <Text style={editStyles.headerTitle}>Edit Receipt</Text>
-            <Text style={editStyles.headerSubtitle}>Review and update details</Text>
-          </View>
-
-          {/* Keep header clean; Save is sticky at bottom */}
-          <View style={editStyles.headerGhostBtn} />
-        </View>
-
-        {/* Sticky Summary Card */}
-        <View style={editStyles.stickySummaryWrap}>
-          <View style={editStyles.summaryCard}>
-            <View style={{ flex: 1 }}>
-              <Text style={editStyles.summaryLabel}>Amount</Text>
-              <Text style={editStyles.summaryAmount}>
-                {currency} {parseAmountInput(price).toFixed(2)}
-              </Text>
-
-              <View style={editStyles.pillsRow}>
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  style={[editStyles.pill, editStyles.pillDark]}
-                  onPress={() => setShowCurrencyPicker(true)}
-                >
-                  <Text style={editStyles.pillTextDark}>{currency}</Text>
-                  <ChevronRight size={14} color="#fff" style={{ marginLeft: 6 }} />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  activeOpacity={0.8}
-                  onPress={() => setShowStatusInfo(true)}
-                  style={[editStyles.statusPill, { backgroundColor: statusConfig.bg }]}
-                >
-                  <View style={[editStyles.statusDot, { backgroundColor: statusConfig.color }]} />
-                  <Text style={[editStyles.statusText, { color: statusConfig.color }]}>{statusConfig.label}</Text>
-                  <Info size={12} color={statusConfig.color} style={{ marginLeft: 6 }} />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <TouchableOpacity
-              style={editStyles.receiptThumb}
-              activeOpacity={0.85}
-              onPress={handleReceiptPress}
-            >
-              {receiptPhotoUri ? (
-                <Image source={{ uri: receiptPhotoUri }} style={editStyles.receiptImage} />
-              ) : (
-                <>
-                  <ReceiptText color="#A1A1AA" size={22} />
-                  <Text style={editStyles.receiptThumbText}>Receipt</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Form */}
-        <ScrollView contentContainerStyle={editStyles.content} showsVerticalScrollIndicator={false}>
-          {/* Merchant */}
-          <View style={editStyles.sectionCard}>
-            <Text style={editStyles.sectionTitle}>Merchant</Text>
-            <View style={editStyles.inputWrap}>
-              <TextInput
-                style={editStyles.input}
-                placeholder="Name"
-                placeholderTextColor="#A1A1AA"
-                value={name}
-                onChangeText={setName}
-              />
-            </View>
-          </View>
-
-          {/* Date + Price */}
-          <View style={editStyles.row}>
-            <TouchableOpacity style={[editStyles.sectionCard, editStyles.half]} onPress={() => setShowDatePicker(true)}>
-              <Text style={editStyles.sectionTitle}>Date</Text>
-              <View style={editStyles.valueRow}>
-                <View style={editStyles.dateValueWrap}>
-                  <View style={editStyles.dateValueIcon}>
-                    <CalendarIcon size={14} color="#111" />
-                  </View>
-                  <View>
-                    <Text style={editStyles.datePrimary}>{dateDisplay.primary}</Text>
-                    <Text style={editStyles.dateSecondary}>{dateDisplay.secondary}</Text>
-                  </View>
-                </View>
-              </View>
-            </TouchableOpacity>
-
-            <View style={[editStyles.sectionCard, editStyles.half]}>
-              <Text style={editStyles.sectionTitle}>Price</Text>
-              <View style={editStyles.inputWrap}>
-                <TextInput
-                  style={editStyles.input}
-                  value={price}
-                  onChangeText={setPrice}
-                  keyboardType="decimal-pad"
-                  placeholder="0.00"
-                  placeholderTextColor="#A1A1AA"
-                />
-              </View>
-            </View>
-          </View>
-
-          {/* Category */}
-          <TouchableOpacity style={editStyles.sectionCard} onPress={() => setShowCategoryPicker(true)}>
-            <Text style={editStyles.sectionTitle}>Category</Text>
-            <View style={editStyles.valueRow}>
-              <View style={editStyles.categoryValueWrap}>
-                <View style={[editStyles.categoryColorDot, { backgroundColor: selectedCategoryColor }]} />
-                <Text style={editStyles.valueText}>{category}</Text>
-              </View>
-              <ChevronRight size={16} color="#C7C7CC" style={{ marginLeft: 8 }} />
-            </View>
-          </TouchableOpacity>
-
-          {/* Notes */}
-          <View style={editStyles.sectionCard}>
-            <Text style={editStyles.sectionTitle}>Notes</Text>
-            <View style={[editStyles.inputWrap, { height: 110, paddingVertical: 10 }]}>
-              <TextInput
-                style={[editStyles.input, { height: "100%", textAlignVertical: "top" }]}
-                placeholder="Add a note (optional)"
-                placeholderTextColor="#A1A1AA"
-                value={comment}
-                onChangeText={setComment}
-                multiline
-              />
-            </View>
-          </View>
-
-          {/* Toggles */}
-          <View style={editStyles.sectionCard}>
-            <Text style={editStyles.sectionTitle}>Options</Text>
-
-            <TouchableOpacity
-              style={[editStyles.toggleRow, isFullPage && editStyles.toggleRowActive]}
-              onPress={() => setIsFullPage(!isFullPage)}
-              activeOpacity={0.85}
-            >
-              <View style={[editStyles.checkBox, isFullPage && editStyles.checkBoxActive]}>
-                {isFullPage && <Check size={12} color="#fff" strokeWidth={4} />}
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={editStyles.toggleTitle}>Full-Page</Text>
-                <Text style={editStyles.toggleSubtitle}>Mark if the receipt image is a full page.</Text>
-              </View>
+    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
+      <View style={styles.container}>
+          <View style={[styles.header, { paddingTop: insets.top + 8 }]}> 
+            <View style={styles.headerSpacer} />
+            <Text style={styles.headerTitle}>Edit Receipt</Text>
+            <TouchableOpacity onPress={onClose} style={styles.closeBtn} hitSlop={8}>
+              <X size={18} color="#111111" />
             </TouchableOpacity>
           </View>
 
-          <View style={{ height: 90 + insets.bottom }} />
-        </ScrollView>
-
-        {/* Sticky bottom Save bar */}
-        <View style={[editStyles.bottomBar, { paddingBottom: Math.max(16, insets.bottom + 8) }]}>
-          <TouchableOpacity
-            activeOpacity={0.9}
-            onPress={handleSave}
-            disabled={!isValid}
-            style={[editStyles.saveBtn, !isValid && editStyles.saveBtnDisabled]}
-          >
-            <Text style={[editStyles.saveBtnText, !isValid && editStyles.saveBtnTextDisabled]}>Save changes</Text>
-          </TouchableOpacity>
-        </View>
-      </Animated.View>
-
-      {/* Pickers */}
-      <SimpleDatePickerModal
-        visible={showDatePicker}
-        currentDate={dateVal}
-        onClose={() => setShowDatePicker(false)}
-        onSelect={(d: string) => {
-          setDateVal(d);
-          setShowDatePicker(false);
-        }}
-      />
-      <SelectionModal
-        visible={showCurrencyPicker}
-        title="Select Currency"
-        options={CURRENCY_OPTIONS}
-        selected={currency}
-        variant="currency"
-        onClose={() => setShowCurrencyPicker(false)}
-        onSelect={(val: string) => {
-          setCurrency(val);
-        }}
-      />
-      <SelectionModal
-        visible={showCategoryPicker}
-        title="Select Category"
-        options={categoryOptions}
-        selected={category}
-        variant="category"
-        accentMap={categoryAccentMap}
-        onClose={() => setShowCategoryPicker(false)}
-        onSelect={(val: string) => {
-          setCategory(val);
-        }}
-      />
-      <Modal
-        visible={showReceiptPreview}
-        transparent={false}
-        animationType="fade"
-        presentationStyle="fullScreen"
-        onRequestClose={() => setShowReceiptPreview(false)}
-      >
-        <SafeAreaView style={editStyles.receiptPreviewOverlay}>
-          <View style={editStyles.receiptPreviewTopBar}>
-            <TouchableOpacity
-              style={editStyles.receiptPreviewTopBtn}
-              onPress={() => setShowReceiptPreview(false)}
-              hitSlop={10}
-            >
-              <X size={20} color="#FFFFFF" />
-            </TouchableOpacity>
-          </View>
           <ScrollView
-            style={editStyles.receiptPreviewZoomWrap}
-            contentContainerStyle={editStyles.receiptPreviewZoomContent}
-            minimumZoomScale={1}
-            maximumZoomScale={4}
-            centerContent
-            bouncesZoom
-            pinchGestureEnabled
-            showsHorizontalScrollIndicator={false}
+            style={styles.contentScroll}
+            contentContainerStyle={[styles.content, { paddingBottom: 24 + insets.bottom }]}
             showsVerticalScrollIndicator={false}
           >
-            {previewPhotoUri ? (
-              <Image source={{ uri: previewPhotoUri }} style={editStyles.receiptPreviewImage} resizeMode="contain" />
-            ) : null}
+            <View style={styles.imageContainer}>
+              {hasImage ? (
+                <Image source={{ uri: item?.receiptPhotoUri ?? undefined }} resizeMode="contain" style={styles.receiptImage} />
+              ) : (
+                <Text style={styles.noImageText}>(no image yet)</Text>
+              )}
+            </View>
+
+            <View style={styles.infoCard}>
+              <View style={styles.checkCircle}>
+                <Check size={20} color="#FFFFFF" strokeWidth={2.8} />
+              </View>
+              <Text style={styles.storeName}>{item?.title ?? "Unknown store"}</Text>
+              <Text style={[styles.totalSum, fontsLoaded ? styles.totalSumRoundedBold : null]}>
+                {item?.amount ?? "RON 0.00"}
+              </Text>
+              <Text style={styles.dateText}>{receiptDateTime}</Text>
+            </View>
+
+            <Text style={styles.billDetailsTitle}>Bill Details</Text>
+            <View style={styles.editDateCard}>
+              <View style={styles.detailsRow}>
+                <View style={styles.editDateLabelWrap}>
+                  <Calendar size={15} color="#6B7280" />
+                  <Text style={styles.editDateLabel}>Date</Text>
+                </View>
+                <View style={styles.editDatePillsWrap}>
+                  <TouchableOpacity style={styles.editPill} activeOpacity={0.85} onPress={openNativeDatePicker} hitSlop={8}>
+                    <Text style={styles.editPillText}>{editableDate}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.editPill} activeOpacity={0.85} onPress={openNativeTimePicker} hitSlop={8}>
+                    <Text style={[styles.editPillText, styles.editTimeText]}>{editableTime}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={[styles.detailsSeparator, styles.detailsSeparatorLarge]} />
+
+              <View style={styles.detailsRow}>
+                <View style={styles.editDateLabelWrap}>
+                  <MapPin size={15} color="#6B7280" />
+                  <Text style={styles.editDateLabel}>Location</Text>
+                </View>
+                <Text style={styles.locationValue}>placeholder</Text>
+              </View>
+
+              <View style={styles.detailsSeparator} />
+
+              <View style={styles.detailsRow}>
+                <View style={styles.editDateLabelWrap}>
+                  <Coins size={15} color="#6B7280" />
+                  <Text style={styles.editDateLabel}>Currency</Text>
+                </View>
+                <View style={styles.currencyValueWrap}>
+                  <Text style={styles.locationValue}>{currencyValue}</Text>
+                  <ChevronRight size={15} color="#9CA3AF" />
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.itemsSectionHeader}>
+              <Text style={styles.itemsSectionTitle}>Items</Text>
+              <Text style={styles.itemsCountText}>({receiptItems.length})</Text>
+            </View>
+            <View style={styles.itemsCard}>
+              {receiptItems.length === 0 ? (
+                <Text style={styles.itemsEmptyText}>(no items yet)</Text>
+              ) : (
+                receiptItems.map((receiptItem, index) => (
+                  <View key={receiptItem.id}>
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={() => openEditItemModal(receiptItem)}
+                      style={styles.itemsEntry}
+                    >
+                      <View style={styles.itemsRow}>
+                        <View style={styles.itemsMainCol}>
+                          <Text style={styles.itemsName} numberOfLines={1}>
+                            {receiptItem.name}
+                          </Text>
+                          <View
+                            style={[
+                              styles.itemCategoryBadge,
+                              {
+                                backgroundColor: withAlpha(receiptItem.categoryColor, 0.14),
+                                borderColor: withAlpha(receiptItem.categoryColor, 0.32),
+                              },
+                            ]}
+                          >
+                            <Text style={[styles.itemCategoryBadgeText, { color: receiptItem.categoryColor }]}>
+                              {receiptItem.categoryName}
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={styles.itemsAmountWrap}>
+                          <Text style={styles.itemsAmount}>{receiptItem.amountLabel}</Text>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                    {index < receiptItems.length - 1 ? <View style={styles.itemsSeparator} /> : null}
+                  </View>
+                ))
+              )}
+            </View>
           </ScrollView>
-          <View style={editStyles.receiptPreviewActionBar}>
-            <TouchableOpacity
-              style={editStyles.receiptPreviewActionBtn}
-              onPress={() => void updatePreviewPhoto("camera")}
-            >
-              <Text style={editStyles.receiptPreviewActionText}>Retake</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={editStyles.receiptPreviewActionBtn}
-              onPress={() => void updatePreviewPhoto("gallery")}
-            >
-              <Text style={editStyles.receiptPreviewActionText}>Gallery</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[editStyles.receiptPreviewActionBtn, editStyles.receiptPreviewDeleteBtn]}
-              onPress={() => {
-                setPreviewPhotoUri(null);
-                setReceiptPhotoUri(null);
-                setShowReceiptPreview(false);
-              }}
-            >
-              <Text style={[editStyles.receiptPreviewActionText, editStyles.receiptPreviewDeleteText]}>Delete</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={editStyles.receiptPreviewFooter}>
-            <TouchableOpacity
-              style={editStyles.receiptPreviewFooterGhostBtn}
-              onPress={() => {
-                setPreviewPhotoUri(receiptPhotoUri ?? null);
-                setShowReceiptPreview(false);
-              }}
-            >
-              <Text style={editStyles.receiptPreviewFooterGhostText}>Discard</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={editStyles.receiptPreviewFooterPrimaryBtn}
-              onPress={() => {
-                setReceiptPhotoUri(previewPhotoUri ?? null);
-                setShowReceiptPreview(false);
-              }}
-            >
-              <Text style={editStyles.receiptPreviewFooterPrimaryText}>Save</Text>
-            </TouchableOpacity>
-          </View>
-        </SafeAreaView>
-      </Modal>
-      <Modal visible={showStatusInfo} transparent animationType="fade" onRequestClose={() => setShowStatusInfo(false)}>
-        <TouchableOpacity style={editStyles.statusInfoOverlay} activeOpacity={1} onPress={() => setShowStatusInfo(false)}>
-          <View style={editStyles.statusInfoCard} onStartShouldSetResponder={() => true}>
-            <View style={editStyles.statusInfoHeader}>
-              <Text style={editStyles.statusInfoTitle}>Receipt Status Guide</Text>
-              <TouchableOpacity onPress={() => setShowStatusInfo(false)} hitSlop={8}>
-                <X size={18} color="#111827" />
-              </TouchableOpacity>
-            </View>
+          {showEditItemModal ? (
+            <View style={styles.editItemOverlay}>
+              <Animated.View
+                style={[
+                  styles.editItemSheet,
+                  {
+                    paddingBottom: Math.max(16, insets.bottom + 8),
+                    transform: [{ translateY: editItemSheetTranslateY }],
+                  },
+                ]}
+              >
+                <View style={styles.editItemDragArea} {...editItemDragResponder.panHandlers}>
+                  <View style={styles.editItemDragHandle} />
+                </View>
 
-            <View style={editStyles.statusInfoRow}>
-              <View style={[editStyles.statusInfoIconWrap, { backgroundColor: "#E6F9EA" }]}>
-                <CheckCircle2 size={15} color="#34C759" />
-              </View>
-              <View style={editStyles.statusInfoTextWrap}>
-                <Text style={editStyles.statusInfoLabel}>Processed</Text>
-                <Text style={editStyles.statusInfoText}>Receipt data was read successfully and looks valid.</Text>
-              </View>
-            </View>
+                <View style={styles.editItemSheetHeader}>
+                  <View style={styles.editItemHeaderSpacer} />
+                  <Text style={styles.editItemSheetTitle}>Edit Item</Text>
+                  <TouchableOpacity onPress={closeEditItemModal} style={styles.editItemHeaderCloseBtn} hitSlop={8}>
+                    <X size={18} color="#111111" />
+                  </TouchableOpacity>
+                </View>
 
-            <View style={editStyles.statusInfoRow}>
-              <View style={[editStyles.statusInfoIconWrap, { backgroundColor: "#FFF4E5" }]}>
-                <Clock3 size={15} color="#FF9500" />
-              </View>
-              <View style={editStyles.statusInfoTextWrap}>
-                <Text style={editStyles.statusInfoLabel}>Needs action</Text>
-                <Text style={editStyles.statusInfoText}>Some fields may be missing; review and confirm details.</Text>
-              </View>
-            </View>
+                <ScrollView
+                  style={styles.editItemContentScroll}
+                  contentContainerStyle={styles.editItemContent}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  <Text style={styles.editItemSectionTitle}>Item Details</Text>
+                  <View style={styles.editItemCard}>
+                    <TextInput
+                      style={styles.editItemNameInput}
+                      value={editItemName}
+                      onChangeText={setEditItemName}
+                      placeholder="Item name"
+                      placeholderTextColor="#9CA3AF"
+                    />
+                    <View style={styles.editItemSeparator} />
 
-            <View style={editStyles.statusInfoRow}>
-              <View style={[editStyles.statusInfoIconWrap, { backgroundColor: "#FFEBEE" }]}>
-                <AlertTriangle size={15} color="#FF3B30" />
-              </View>
-              <View style={editStyles.statusInfoTextWrap}>
-                <Text style={editStyles.statusInfoLabel}>Failed</Text>
-                <Text style={editStyles.statusInfoText}>Receipt parsing failed, so manual review is required.</Text>
-              </View>
-            </View>
+                    <View style={styles.editItemRow}>
+                      <Text style={styles.editItemLabel}>Quantity</Text>
+                      <TextInput
+                        style={styles.editItemValueInput}
+                        value={editItemQuantity}
+                        onChangeText={setEditItemQuantity}
+                        placeholder="1"
+                        placeholderTextColor="#9CA3AF"
+                        keyboardType="numbers-and-punctuation"
+                      />
+                    </View>
+                    <View style={styles.editItemSeparator} />
 
-            <Text style={editStyles.statusInfoHint}>Tap outside to dismiss.</Text>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+                    <View style={styles.editItemRow}>
+                      <Text style={styles.editItemLabel}>Unit</Text>
+                      <TextInput
+                        style={styles.editItemValueInput}
+                        value={editItemUnit}
+                        onChangeText={setEditItemUnit}
+                        placeholder="pcs"
+                        placeholderTextColor="#9CA3AF"
+                      />
+                    </View>
+                    <View style={styles.editItemSeparator} />
+
+                    <View style={styles.editItemRow}>
+                      <Text style={styles.editItemLabel}>Total price</Text>
+                      <TextInput
+                        style={styles.editItemValueInput}
+                        value={editItemTotalPrice}
+                        onChangeText={setEditItemTotalPrice}
+                        placeholder="0.00"
+                        placeholderTextColor="#9CA3AF"
+                        keyboardType="decimal-pad"
+                      />
+                    </View>
+                  </View>
+                  <Text style={styles.editItemHelperText}>Edit the item name, quantity, unit, and price.</Text>
+                  <Text style={styles.editItemCategorySectionTitle}>Category</Text>
+                  <View style={styles.editItemCategoryCard}>
+                    <View style={styles.editItemRow}>
+                      <Text style={styles.editItemLabel}>Category</Text>
+                      <TouchableOpacity
+                        activeOpacity={0.8}
+                        style={styles.editItemCategoryTrigger}
+                        onPress={() => setShowEditItemCategoryOptions((prev) => !prev)}
+                      >
+                        <Text style={styles.editItemValueText}>{editItemCategory.trim() || "General"}</Text>
+                        <ChevronDown
+                          size={14}
+                          color="#6B7280"
+                          style={showEditItemCategoryOptions ? styles.editItemChevronOpen : null}
+                        />
+                      </TouchableOpacity>
+                    </View>
+                    {showEditItemCategoryOptions ? (
+                      <View style={styles.editItemCategoryOptions}>
+                        {editItemCategoryOptions.map((option) => {
+                          const isActive = option.toLowerCase() === (editItemCategory.trim() || "General").toLowerCase();
+                          return (
+                            <TouchableOpacity
+                              key={option}
+                              activeOpacity={0.8}
+                              style={[
+                                styles.editItemCategoryOption,
+                                isActive ? styles.editItemCategoryOptionActive : null,
+                              ]}
+                              onPress={() => {
+                                setEditItemCategory(option);
+                                setShowEditItemCategoryOptions(false);
+                              }}
+                            >
+                              <Text
+                                style={[
+                                  styles.editItemCategoryOptionText,
+                                  isActive ? styles.editItemCategoryOptionTextActive : null,
+                                ]}
+                              >
+                                {option}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={styles.editItemActionsTitle}>Actions</Text>
+
+                  <TouchableOpacity style={styles.editItemSaveBtn} onPress={handleSaveEditedItem} activeOpacity={0.85}>
+                    <View style={styles.editItemBtnContent}>
+                      <Check size={16} color="#FFFFFF" strokeWidth={2.8} />
+                      <Text style={styles.editItemSaveBtnText}>Save Item</Text>
+                    </View>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.editItemDeleteBtn} onPress={handleDeleteEditedItem} activeOpacity={0.85}>
+                    <View style={styles.editItemBtnContent}>
+                      <Trash2 size={16} color="#FFFFFF" strokeWidth={2.4} />
+                      <Text style={styles.editItemDeleteBtnText}>Delete Item</Text>
+                    </View>
+                  </TouchableOpacity>
+                </ScrollView>
+              </Animated.View>
+            </View>
+          ) : null}
+          {Platform.OS !== "android" && showDatePickerModal ? (
+            <Modal transparent animationType="fade" visible onRequestClose={() => setShowDatePickerModal(false)}>
+              <View style={styles.datePickerOverlay}>
+                <View style={styles.datePickerCard}>
+                  <View style={styles.datePickerHeader}>
+                    <TouchableOpacity onPress={() => setShowDatePickerModal(false)} hitSlop={8}>
+                      <Text style={styles.datePickerActionText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.datePickerTitle}>Select Date</Text>
+                    <TouchableOpacity onPress={confirmIosDatePicker} hitSlop={8}>
+                      <Text style={styles.datePickerActionText}>Done</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <DateTimePicker
+                    value={pendingDatePickerValue}
+                    mode="date"
+                    display={Platform.OS === "ios" ? "spinner" : "default"}
+                    onChange={(_event, selectedDate) => {
+                      if (selectedDate) {
+                        setPendingDatePickerValue(selectedDate);
+                      }
+                    }}
+                  />
+                </View>
+              </View>
+            </Modal>
+          ) : null}
+          {Platform.OS !== "android" && showTimePickerModal ? (
+            <Modal transparent animationType="fade" visible onRequestClose={() => setShowTimePickerModal(false)}>
+              <View style={styles.datePickerOverlay}>
+                <View style={styles.datePickerCard}>
+                  <View style={styles.datePickerHeader}>
+                    <TouchableOpacity onPress={() => setShowTimePickerModal(false)} hitSlop={8}>
+                      <Text style={styles.datePickerActionText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.datePickerTitle}>Select Time</Text>
+                    <TouchableOpacity onPress={confirmIosTimePicker} hitSlop={8}>
+                      <Text style={styles.datePickerActionText}>Done</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <DateTimePicker
+                    value={pendingTimePickerValue}
+                    mode="time"
+                    is24Hour
+                    display={Platform.OS === "ios" ? "spinner" : "default"}
+                    onChange={(_event, selectedDate) => {
+                      if (selectedDate) {
+                        setPendingTimePickerValue(selectedDate);
+                      }
+                    }}
+                  />
+                </View>
+              </View>
+            </Modal>
+          ) : null}
+      </View>
     </Modal>
   );
 }
 
-const editStyles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F2F2F7" },
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#F8F9FA",
+  },
   header: {
-    backgroundColor: "#F7F7FA",
-    paddingTop: 14,
-    paddingBottom: 14,
     paddingHorizontal: 16,
+    paddingBottom: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
   },
-  headerIconBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
+  headerSpacer: {
+    width: 34,
+    height: 34,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#111111",
+  },
+  closeBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#E5E7EB",
-  },
-  headerTitleWrap: { alignItems: "center" },
-  headerTitle: { color: "#111", fontSize: 18, fontWeight: "800", letterSpacing: 0.2 },
-  headerSubtitle: { marginTop: 1, color: "#6B7280", fontSize: 12, fontWeight: "600" },
-  headerGhostBtn: {
-    width: 36,
-    height: 36,
-  },
-
-  stickySummaryWrap: {
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 10,
-    backgroundColor: "#F2F2F7",
-  },
-  summaryCard: {
-    backgroundColor: "#fff",
-    borderRadius: 20,
-    padding: 16,
-    flexDirection: "row",
-    gap: 12,
-    borderWidth: 1,
-    borderColor: "#EFEFF4",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  summaryLabel: { fontSize: 12, color: "#8E8E93", fontWeight: "700" },
-  summaryAmount: { fontSize: 24, color: "#111", fontWeight: "900", marginTop: 2 },
-
-  pillsRow: { flexDirection: "row", alignItems: "center", marginTop: 10, gap: 10 },
-  pill: {
-    flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
+    justifyContent: "center",
   },
-  pillDark: { backgroundColor: "#111" },
-  pillTextDark: { color: "#fff", fontWeight: "800", fontSize: 13 },
-
-  statusPill: { flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 8, borderRadius: 999 },
-  statusDot: { width: 7, height: 7, borderRadius: 999, marginRight: 8 },
-  statusText: { fontSize: 12, fontWeight: "800" },
-
-  receiptThumb: {
-    width: 86,
-    height: 86,
+  contentScroll: {
+    flex: 1,
+  },
+  content: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    alignItems: "center",
+  },
+  imageContainer: {
+    width: "100%",
+    maxWidth: 420,
+    height: 320,
     borderRadius: 18,
-    backgroundColor: "#F5F5F7",
     borderWidth: 1,
-    borderColor: "#E5E5EA",
+    borderColor: "#E5E7EB",
+    backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
@@ -725,255 +890,497 @@ const editStyles = StyleSheet.create({
     width: "100%",
     height: "100%",
   },
-  receiptPreviewOverlay: {
-    flex: 1,
-    backgroundColor: "#000000",
+  noImageText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#9CA3AF",
+  },
+  billDetailsTitle: {
+    width: "100%",
+    maxWidth: 420,
+    marginTop: 12,
+    marginBottom: 4,
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#111827",
+  },
+  infoCard: {
+    width: "100%",
+    maxWidth: 420,
+    marginTop: 6,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 12,
-    paddingTop: 18,
-    paddingBottom: 18,
+    paddingVertical: 18,
+    paddingHorizontal: 16,
   },
-  receiptPreviewTopBar: {
-    width: "100%",
-    flexDirection: "row",
-    justifyContent: "flex-end",
+  checkCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#22C55E",
+    alignItems: "center",
+    justifyContent: "center",
     marginBottom: 10,
   },
-  receiptPreviewTopBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.15)",
+  storeName: {
+    fontSize: 19,
+    fontWeight: "800",
+    color: "#111111",
+    textAlign: "center",
+  },
+  totalSum: {
+    marginTop: 5,
+    fontSize: 24,
+    fontWeight: "900",
+    color: "#111111",
+    textAlign: "center",
+  },
+  totalSumRoundedBold: {
+    fontFamily: "Nunito_900Black",
+    fontSize: 30,
+    fontWeight: "900",
+    letterSpacing: 0.1,
+    lineHeight: 34,
+  },
+  dateText: {
+    marginTop: 6,
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#6B7280",
+    textAlign: "center",
+  },
+  editDateCard: {
+    width: "100%",
+    maxWidth: 420,
+    marginTop: 12,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.3)",
-    alignItems: "center",
-    justifyContent: "center",
+    borderColor: "#E5E7EB",
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
-  receiptPreviewZoomWrap: {
-    width: "100%",
-    flex: 1,
-  },
-  receiptPreviewZoomContent: {
-    width: "100%",
-    height: "100%",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  receiptPreviewImage: {
-    width: "100%",
-    height: "100%",
-  },
-  receiptPreviewActionBar: {
-    width: "100%",
+  detailsRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 10,
-    marginTop: 10,
-  },
-  receiptPreviewActionBtn: {
-    flex: 1,
-    borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.14)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.2)",
-    paddingVertical: 11,
     alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    paddingVertical: 4,
   },
-  receiptPreviewActionText: {
+  detailsSeparator: {
+    height: 1,
+    backgroundColor: "#EEF0F3",
+    marginVertical: 14,
+  },
+  detailsSeparatorLarge: {
+    marginVertical: 18,
+  },
+  editDateLabelWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  editDateLabel: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#6B7280",
+  },
+  editDatePillsWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexShrink: 1,
+  },
+  editPill: {
+    minWidth: 92,
+    height: 34,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#F9FAFB",
+    paddingHorizontal: 10,
+    justifyContent: "center",
+  },
+  editPillText: {
     fontSize: 13,
     fontWeight: "700",
-    color: "#FFFFFF",
-  },
-  receiptPreviewDeleteBtn: {
-    backgroundColor: "rgba(239,68,68,0.22)",
-    borderColor: "rgba(239,68,68,0.45)",
-  },
-  receiptPreviewDeleteText: {
-    color: "#FECACA",
-  },
-  receiptPreviewFooter: {
-    width: "100%",
-    flexDirection: "row",
-    gap: 10,
-    marginTop: 10,
-  },
-  receiptPreviewFooterGhostBtn: {
-    flex: 1,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.25)",
-    paddingVertical: 11,
-    alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.08)",
-  },
-  receiptPreviewFooterGhostText: {
-    fontSize: 14,
-    color: "#E5E7EB",
-    fontWeight: "700",
-  },
-  receiptPreviewFooterPrimaryBtn: {
-    flex: 1,
-    borderRadius: 12,
-    paddingVertical: 11,
-    alignItems: "center",
-    backgroundColor: "#FFFFFF",
-  },
-  receiptPreviewFooterPrimaryText: {
-    fontSize: 14,
     color: "#111827",
-    fontWeight: "800",
+    padding: 0,
   },
-  receiptThumbText: { marginTop: 6, fontSize: 11, color: "#8E8E93", fontWeight: "700" },
-
-  content: { paddingHorizontal: 16, paddingBottom: 0 },
-
-  sectionCard: {
-    backgroundColor: "#fff",
-    borderRadius: 18,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#EFEFF4",
-    marginBottom: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.03,
-    shadowRadius: 6,
-    elevation: 1,
+  editTimeText: {
+    textAlign: "center",
   },
-  sectionTitle: { fontSize: 13, color: "#8E8E93", fontWeight: "800", marginBottom: 10, letterSpacing: 0.2 },
-
-  inputWrap: {
-    backgroundColor: "#F7F7FA",
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    height: 48,
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "#EFEFF4",
-  },
-  input: { fontSize: 16, color: "#111", fontWeight: "600" },
-
-  row: { flexDirection: "row", gap: 12 },
-  half: { flex: 1 },
-
-  valueRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  dateValueWrap: { flexDirection: "row", alignItems: "center", gap: 10 },
-  dateValueIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 10,
-    backgroundColor: "#F3F4F6",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  datePrimary: { fontSize: 17, color: "#111", fontWeight: "900", letterSpacing: 0.2 },
-  dateSecondary: { marginTop: 1, fontSize: 11, color: "#6B7280", fontWeight: "700" },
-  categoryValueWrap: { flexDirection: "row", alignItems: "center", gap: 8 },
-  categoryColorDot: { width: 10, height: 10, borderRadius: 999 },
-  valueText: { fontSize: 16, color: "#111", fontWeight: "800" },
-  statusInfoOverlay: {
+  datePickerOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: 18,
+    backgroundColor: "rgba(15, 23, 42, 0.24)",
+    justifyContent: "flex-end",
+    paddingHorizontal: 14,
+    paddingBottom: 18,
   },
-  statusInfoCard: {
-    width: "100%",
-    maxWidth: 430,
-    borderRadius: 18,
+  datePickerCard: {
     backgroundColor: "#FFFFFF",
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: "#E5E7EB",
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+    overflow: "hidden",
   },
-  statusInfoHeader: {
+  datePickerHeader: {
+    minHeight: 48,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E7EB",
+    paddingHorizontal: 14,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 8,
   },
-  statusInfoTitle: {
-    fontSize: 17,
-    color: "#111827",
+  datePickerTitle: {
+    fontSize: 15,
     fontWeight: "800",
+    color: "#111827",
   },
-  statusInfoRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    paddingVertical: 9,
-  },
-  statusInfoIconWrap: {
-    width: 28,
-    height: 28,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 10,
-    marginTop: 1,
-  },
-  statusInfoTextWrap: { flex: 1 },
-  statusInfoLabel: { fontSize: 14, color: "#111827", fontWeight: "800" },
-  statusInfoText: { marginTop: 2, fontSize: 12, lineHeight: 18, color: "#4B5563", fontWeight: "600" },
-  statusInfoHint: {
-    marginTop: 6,
-    textAlign: "center",
-    fontSize: 11,
-    color: "#6B7280",
+  datePickerActionText: {
+    fontSize: 14,
     fontWeight: "700",
+    color: "#111827",
   },
-
-  toggleRow: {
+  locationValue: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#111827",
+  },
+  currencyValueWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  itemsCard: {
+    width: "100%",
+    maxWidth: 420,
+    marginTop: 6,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  itemsSectionHeader: {
+    width: "100%",
+    maxWidth: 420,
+    marginTop: 12,
+    marginBottom: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    gap: 6,
+  },
+  itemsSectionTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#111827",
+  },
+  itemsCountText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#6B7280",
+  },
+  itemsEmptyText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#9CA3AF",
+  },
+  itemsEntry: {
+    paddingVertical: 3,
+  },
+  itemsRow: {
     flexDirection: "row",
     alignItems: "flex-start",
-    padding: 12,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#EFEFF4",
-    backgroundColor: "#F7F7FA",
-    gap: 10,
+    justifyContent: "space-between",
+    minHeight: 56,
+    paddingVertical: 4,
+    gap: 12,
   },
-  toggleRowActive: { backgroundColor: "#F5F3FF", borderColor: "#111" },
-  checkBox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: "#C7C7CC",
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 2,
+  itemsMainCol: {
+    flex: 1,
+    minWidth: 0,
   },
-  checkBoxActive: { backgroundColor: "#7E57FF", borderColor: "#7E57FF" },
-  toggleTitle: { fontSize: 14, fontWeight: "900", color: "#111" },
-  toggleSubtitle: { marginTop: 2, fontSize: 12, fontWeight: "700", color: "#8E8E93" },
-
-  bottomBar: {
+  itemsName: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#111827",
+  },
+  editItemOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(15, 23, 42, 0.2)",
+  },
+  editItemSheet: {
     position: "absolute",
     left: 0,
     right: 0,
     bottom: 0,
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 16,
-    backgroundColor: "rgba(242,242,247,0.92)",
+    height: "80%",
+    backgroundColor: "#F8F9FA",
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
     borderTopWidth: 1,
-    borderTopColor: "#E5E5EA",
+    borderColor: "#E5E7EB",
+    overflow: "hidden",
   },
-  saveBtn: {
-    height: 52,
-    borderRadius: 16,
-    backgroundColor: "#111",
+  editItemDragArea: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingBottom: 8,
+  },
+  editItemDragHandle: {
+    width: 44,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: "#D1D5DB",
+    marginTop: 20,
+  },
+  editItemSheetHeader: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#F8F9FA",
+  },
+  editItemSheetTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#111111",
+    textAlign: "center",
+  },
+  editItemHeaderCloseBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  editItemHeaderSpacer: {
+    width: 34,
+    height: 34,
+  },
+  itemsAmountWrap: {
+    width: 108,
+    marginLeft: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    alignSelf: "center",
+  },
+  itemsAmount: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#111827",
+    textAlign: "center",
+    width: "100%",
+  },
+  itemCategoryBadge: {
+    alignSelf: "flex-start",
+    marginTop: 3,
+    paddingHorizontal: 8,
+    minHeight: 22,
+    borderRadius: 8,
+    borderWidth: 1,
+    justifyContent: "center",
+  },
+  itemCategoryBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  itemsSeparator: {
+    height: 1,
+    backgroundColor: "#EEF0F3",
+    marginVertical: 4,
+  },
+  editItemContentScroll: {
+    flex: 1,
+    width: "100%",
+  },
+  editItemContent: {
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 8,
+    alignItems: "center",
+  },
+  editItemSectionTitle: {
+    width: "100%",
+    maxWidth: 420,
+    marginLeft: 25,
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#111827",
+    marginBottom: 8,
+  },
+  editItemCard: {
+    width: "100%",
+    maxWidth: 420,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  editItemHelperText: {
+    width: "100%",
+    maxWidth: 420,
+    marginTop: 6,
+    marginLeft: 25,
+    marginBottom: 20,
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#6B7280",
+  },
+  editItemCategorySectionTitle: {
+    width: "100%",
+    maxWidth: 420,
+    marginBottom: 2,
+    marginLeft: 25,
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#111111",
+  },
+  editItemCategoryCard: {
+    width: "100%",
+    maxWidth: 420,
+    marginTop: 10,
+    borderRadius: 100,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 14,
+    paddingVertical: 2,
+  },
+  editItemNameInput: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#111111",
+    marginBottom: 12,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+  },
+  editItemRow: {
+    minHeight: 38,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  editItemLabel: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#6B7280",
+  },
+  editItemValueInput: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#111827",
+    minWidth: 72,
+    textAlign: "right",
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+  },
+  editItemValueText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#111827",
+  },
+  editItemCategoryTrigger: {
+    minHeight: 32,
+    paddingLeft: 0,
+    paddingRight: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  editItemChevronOpen: {
+    transform: [{ rotate: "180deg" }],
+  },
+  editItemCategoryOptions: {
+    marginTop: 8,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  editItemCategoryOption: {
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#F9FAFB",
+  },
+  editItemCategoryOptionActive: {
+    borderColor: "#111827",
+    backgroundColor: "#111827",
+  },
+  editItemCategoryOptionText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#374151",
+  },
+  editItemCategoryOptionTextActive: {
+    color: "#FFFFFF",
+  },
+  editItemActionsTitle: {
+    width: "100%",
+    maxWidth: 420,
+    marginTop: 20,
+    marginLeft: 25,
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#111111",
+  },
+  editItemSeparator: {
+    height: 1,
+    backgroundColor: "#EEF0F3",
+    marginVertical: 4,
+  },
+  editItemSaveBtn: {
+    width: "100%",
+    maxWidth: 420,
+    marginTop: 12,
+    height: 48,
+    borderRadius: 100,
+    backgroundColor: "#111111",
     alignItems: "center",
     justifyContent: "center",
   },
-  saveBtnDisabled: { backgroundColor: "#D1D1D6" },
-  saveBtnText: { color: "#fff", fontWeight: "900", fontSize: 16 },
-  saveBtnTextDisabled: { color: "#8E8E93" },
+  editItemBtnContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  editItemSaveBtnText: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  editItemDeleteBtn: {
+    width: "100%",
+    maxWidth: 420,
+    marginTop: 10,
+    height: 46,
+    borderRadius: 100,
+    backgroundColor: "#ff5050",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  editItemDeleteBtnText: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
 });
 
 export { ReceiptDetailModal };
