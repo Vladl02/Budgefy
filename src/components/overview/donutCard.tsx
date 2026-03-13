@@ -1,8 +1,9 @@
-import React, { useMemo, useRef, useState } from "react";
-import { View, Text, StyleSheet, Pressable, LayoutAnimation, Platform, UIManager, Animated, useWindowDimensions } from "react-native";
-import { Minimize2, Maximize2, Pencil } from "lucide-react-native";
 import { CATEGORY_STYLES, IconKey } from "@/src/components/overview/category";
 import { DonutChart } from "@/src/components/overview/donutCard/components/DonutChart";
+import { useAppTheme } from "@/src/providers/AppThemeProvider";
+import { Maximize2, Minimize2, Pencil } from "lucide-react-native";
+import React, { useMemo, useRef, useState } from "react";
+import { Animated, LayoutAnimation, Platform, Pressable, StyleSheet, Text, UIManager, useWindowDimensions, View } from "react-native";
 
 // Enable LayoutAnimation on Android
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -44,6 +45,7 @@ export default function MonthlySummaryCard({
   onRightPress,
   onCategoryPress,
 }: Props) {
+  const { isDark } = useAppTheme();
   const { width } = useWindowDimensions();
   const isCompactLayout = width < 380;
   const total = useMemo(() => items.reduce((s, i) => s + i.budget, 0), [items]);
@@ -114,49 +116,49 @@ export default function MonthlySummaryCard({
   };
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, isDark ? styles.cardDark : null]}>
       <View style={styles.controlsRow}>
-        <Pressable style={styles.controlBtn} onPress={handleLeftPress} hitSlop={10}>
+        <Pressable style={[styles.controlBtn, isDark ? styles.controlBtnDark : null]} onPress={handleLeftPress} hitSlop={10}>
           {collapsed ? (
-            <Maximize2 size={14} color="#111827" strokeWidth={2.5} />
+            <Maximize2 size={14} color={isDark ? "#F3F4F6" : "#111827"} strokeWidth={2.5} />
           ) : (
-            <Minimize2 size={14} color="#111827" strokeWidth={2.5} />
+            <Minimize2 size={14} color={isDark ? "#F3F4F6" : "#111827"} strokeWidth={2.5} />
           )}
         </Pressable>
-        <Text style={styles.headerTitle}>Monthly Budget</Text>
-        <Pressable style={styles.controlBtn} onPress={onRightPress} hitSlop={10}>
-          <Pencil size={14} color="#111827" strokeWidth={2.5} />
+        <Text style={[styles.headerTitle, isDark ? styles.headerTitleDark : null]}>Monthly Budget</Text>
+        <Pressable style={[styles.controlBtn, isDark ? styles.controlBtnDark : null]} onPress={onRightPress} hitSlop={10}>
+          <Pencil size={14} color={isDark ? "#F3F4F6" : "#111827"} strokeWidth={2.5} />
         </Pressable>
       </View>
 
       <View style={[styles.summaryRow, isCompactLayout ? styles.summaryRowCompact : null]}>
         <View style={[styles.donutShell, isCompactLayout ? styles.donutShellCompact : null]}>
           <DonutChart size={isCompactLayout ? 104 : 116} strokeWidth={isCompactLayout ? 12 : 14} data={data} />
-          <View style={[styles.donutCenter, isCompactLayout ? styles.donutCenterCompact : null]}>
-            <Text style={styles.donutCenterLabel}>Total</Text>
-            <Text style={styles.donutCenterValue}>${formatMoney(total)}</Text>
+          <View style={[styles.donutCenter, isDark ? styles.donutCenterDark : null, isCompactLayout ? styles.donutCenterCompact : null]}>
+            <Text style={[styles.donutCenterLabel, isDark ? styles.donutCenterLabelDark : null]}>Total</Text>
+            <Text style={[styles.donutCenterValue, isDark ? styles.donutCenterValueDark : null]}>${formatMoney(total)}</Text>
           </View>
         </View>
 
         <View style={[styles.statsColumn, isCompactLayout ? styles.statsColumnCompact : null]}>
           <View style={styles.statRow}>
-            <View style={styles.statCard}>
-              <Text style={styles.statKey}>Period</Text>
-              <Text style={styles.statVal}>{label}</Text>
+            <View style={[styles.statCard, isDark ? styles.statCardDark : null]}>
+              <Text style={[styles.statKey, isDark ? styles.statKeyDark : null]}>Period</Text>
+              <Text style={[styles.statVal, isDark ? styles.statValDark : null]}>{label}</Text>
             </View>
-            <View style={[styles.statCard, styles.statCardGap]}>
-              <Text style={styles.statKey}>Per Day</Text>
-              <Text style={styles.statVal}>${formatMoney(perDay)}</Text>
+            <View style={[styles.statCard, isDark ? styles.statCardDark : null, styles.statCardGap]}>
+              <Text style={[styles.statKey, isDark ? styles.statKeyDark : null]}>Per Day</Text>
+              <Text style={[styles.statVal, isDark ? styles.statValDark : null]}>${formatMoney(perDay)}</Text>
             </View>
           </View>
           <View style={styles.statRow}>
-            <View style={styles.statCard}>
-              <Text style={styles.statKey}>Categories</Text>
-              <Text style={styles.statVal}>{categoryCount}</Text>
+            <View style={[styles.statCard, isDark ? styles.statCardDark : null]}>
+              <Text style={[styles.statKey, isDark ? styles.statKeyDark : null]}>Categories</Text>
+              <Text style={[styles.statVal, isDark ? styles.statValDark : null]}>{categoryCount}</Text>
             </View>
-            <View style={[styles.statCard, styles.statCardGap]}>
-              <Text style={styles.statKey}>Average</Text>
-              <Text style={styles.statVal}>${formatMoney(averageBudget)}</Text>
+            <View style={[styles.statCard, isDark ? styles.statCardDark : null, styles.statCardGap]}>
+              <Text style={[styles.statKey, isDark ? styles.statKeyDark : null]}>Average</Text>
+              <Text style={[styles.statVal, isDark ? styles.statValDark : null]}>${formatMoney(averageBudget)}</Text>
             </View>
           </View>
         </View>
@@ -179,7 +181,7 @@ export default function MonthlySummaryCard({
             return (
               <Animated.View key={item.id} style={{ opacity: anim, transform: [{ translateY }] }}>
                 <Pressable
-                  style={({ pressed }) => [styles.rowCard, pressed ? styles.rowCardPressed : null]}
+                  style={({ pressed }) => [styles.rowCard, isDark ? styles.rowCardDark : null, pressed ? styles.rowCardPressed : null]}
                   onPress={() => onCategoryPress?.(item)}
                 >
                   <View style={styles.rowTop}>
@@ -188,13 +190,13 @@ export default function MonthlySummaryCard({
                         <Icon size={18} color={activeColor} strokeWidth={2.5} />
                       </View>
                       <View style={styles.rowTextWrap}>
-                        <Text style={styles.rowTitle}>{item.title}</Text>
-                        <Text style={styles.rowPct}>{pct.toFixed(1)}% of total</Text>
+                        <Text style={[styles.rowTitle, isDark ? styles.rowTitleDark : null]}>{item.title}</Text>
+                        <Text style={[styles.rowPct, isDark ? styles.rowPctDark : null]}>{pct.toFixed(1)}% of total</Text>
                       </View>
                     </View>
-                    <Text style={styles.rowAmount}>${formatMoney(item.budget)}</Text>
+                    <Text style={[styles.rowAmount, isDark ? styles.rowAmountDark : null]}>${formatMoney(item.budget)}</Text>
                   </View>
-                  <View style={styles.rowBarTrack}>
+                  <View style={[styles.rowBarTrack, isDark ? styles.rowBarTrackDark : null]}>
                     <View
                       style={[
                         styles.rowBarFill,
@@ -238,6 +240,10 @@ const styles = StyleSheet.create({
     shadowRadius: 14,
     elevation: 4,
   },
+  cardDark: {
+    backgroundColor: "#111827",
+    borderColor: "#374151",
+  },
   controlsRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -251,6 +257,9 @@ const styles = StyleSheet.create({
     color: "#111827",
     textTransform: "uppercase",
   },
+  headerTitleDark: {
+    color: "#F3F4F6",
+  },
   controlBtn: {
     width: 32,
     height: 32,
@@ -260,6 +269,10 @@ const styles = StyleSheet.create({
     borderColor: "#E5E7EB",
     alignItems: "center",
     justifyContent: "center",
+  },
+  controlBtnDark: {
+    backgroundColor: "#1F2937",
+    borderColor: "#374151",
   },
   summaryRow: {
     flexDirection: "row",
@@ -293,6 +306,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#EEF1F6",
   },
+  donutCenterDark: {
+    backgroundColor: "#111827",
+    borderColor: "#4B5563",
+  },
   donutCenterCompact: {
     width: 64,
     height: 64,
@@ -305,11 +322,17 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
+  donutCenterLabelDark: {
+    color: "#9CA3AF",
+  },
   donutCenterValue: {
     marginTop: 2,
     fontSize: 12,
     fontWeight: "800",
     color: "#111827",
+  },
+  donutCenterValueDark: {
+    color: "#F9FAFB",
   },
   statsColumn: {
     flex: 1,
@@ -335,6 +358,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 7,
   },
+  statCardDark: {
+    backgroundColor: "#1F2937",
+    borderColor: "#374151",
+  },
   statCardGap: {
     marginLeft: 8,
   },
@@ -345,11 +372,17 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 0.4,
   },
+  statKeyDark: {
+    color: "#9CA3AF",
+  },
   statVal: {
     marginTop: 4,
     fontSize: 13,
     fontWeight: "800",
     color: "#111827",
+  },
+  statValDark: {
+    color: "#F9FAFB",
   },
   rowsSection: {
     marginTop: 10,
@@ -362,6 +395,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 9,
     marginTop: 8,
+  },
+  rowCardDark: {
+    backgroundColor: "#1F2937",
+    borderColor: "#374151",
   },
   rowCardPressed: {
     opacity: 0.92,
@@ -393,16 +430,25 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#111827",
   },
+  rowTitleDark: {
+    color: "#F3F4F6",
+  },
   rowPct: {
     marginTop: 2,
     fontSize: 11,
     fontWeight: "600",
     color: "#6B7280",
   },
+  rowPctDark: {
+    color: "#9CA3AF",
+  },
   rowAmount: {
     fontSize: 13,
     fontWeight: "800",
     color: "#111827",
+  },
+  rowAmountDark: {
+    color: "#F9FAFB",
   },
   rowBarTrack: {
     marginTop: 8,
@@ -410,6 +456,9 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: "#ECEFF5",
     overflow: "hidden",
+  },
+  rowBarTrackDark: {
+    backgroundColor: "#374151",
   },
   rowBarFill: {
     height: "100%",

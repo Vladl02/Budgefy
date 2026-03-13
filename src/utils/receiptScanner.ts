@@ -1,8 +1,4 @@
 import { Platform } from "react-native";
-import DocumentScanner, {
-  ResponseType,
-  ScanDocumentResponseStatus,
-} from "react-native-document-scanner-plugin";
 import { FunctionsHttpError } from "@supabase/supabase-js";
 import type { SQLiteDatabase } from "expo-sqlite";
 import { supabase } from "@/src/utils/supabase";
@@ -23,13 +19,58 @@ export type ReceiptScanResult =
   | { status: "cancel" }
   | { status: "no_receipt" }
   | { status: "no_user_category" }
+  | { status: "unavailable_native" }
   | { status: "unavailable_web" };
 
 export type ReceiptScanOnlyResult =
   | { status: "success"; scannedImages: string[] }
   | { status: "cancel" }
   | { status: "no_receipt" }
+  | { status: "unavailable_native" }
   | { status: "unavailable_web" };
+
+type DocumentScannerModule = {
+  scanDocument: (options: {
+    responseType: string;
+    croppedImageQuality: number;
+    maxNumDocuments: number;
+  }) => Promise<{
+    status?: string;
+    scannedImages?: string[];
+  }>;
+  ResponseType?: {
+    Base64?: string;
+  };
+  ScanDocumentResponseStatus?: {
+    Cancel?: string;
+  };
+};
+
+const isDocumentScannerModule = (value: unknown): value is DocumentScannerModule => {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as { scanDocument?: unknown };
+  return typeof candidate.scanDocument === "function";
+};
+
+const loadDocumentScannerModule = async (): Promise<DocumentScannerModule | null> => {
+  try {
+    const scannerImport = await import("react-native-document-scanner-plugin");
+    const scannerCandidate = (scannerImport as { default?: unknown }).default ?? scannerImport;
+
+    if (!isDocumentScannerModule(scannerCandidate)) {
+      console.warn("Document scanner module loaded without scanDocument API.");
+      return null;
+    }
+
+    return scannerCandidate;
+  } catch (error) {
+    console.warn("Document scanner native module is not available in this build:", error);
+    return null;
+  }
+};
 
 const resolveSpendingContext = async (db: SQLiteDatabase): Promise<SpendingContext | null> => {
   const userRow = await db.getFirstAsync<{ id: number }>(
@@ -138,13 +179,20 @@ export const scanReceiptImages = async (): Promise<ReceiptScanOnlyResult> => {
     return { status: "unavailable_web" };
   }
 
-  const result = await DocumentScanner.scanDocument({
-    responseType: ResponseType.Base64,
+  const documentScannerModule = await loadDocumentScannerModule();
+  if (!documentScannerModule?.scanDocument) {
+    return { status: "unavailable_native" };
+  }
+
+  const responseType = documentScannerModule.ResponseType?.Base64 ?? "base64";
+  const cancelStatus = documentScannerModule.ScanDocumentResponseStatus?.Cancel ?? "cancel";
+  const result = await documentScannerModule.scanDocument({
+    responseType,
     croppedImageQuality: 100,
     maxNumDocuments: 1,
   });
 
-  if (result.status === ScanDocumentResponseStatus.Cancel) {
+  if (result.status?.toLowerCase() === cancelStatus.toLowerCase()) {
     return { status: "cancel" };
   }
 

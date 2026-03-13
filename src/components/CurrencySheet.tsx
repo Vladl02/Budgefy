@@ -1,6 +1,7 @@
 import React from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SlidingSheet } from "./SlidingSheet";
+import { useAppTheme } from "@/src/providers/AppThemeProvider";
 
 type CurrencyOption = {
   code: string;
@@ -33,6 +34,7 @@ export function CurrencySheet({
   selectedCurrency,
   options,
 }: CurrencySheetProps) {
+  const { isDark } = useAppTheme();
   const list = options ?? defaultOptions;
 
   if (!visible) {
@@ -40,10 +42,16 @@ export function CurrencySheet({
   }
 
   return (
-    <SlidingSheet onDismiss={onDismiss} heightPercent={0.55} backdropOpacity={0.25}>
+    <SlidingSheet
+      onDismiss={onDismiss}
+      heightPercent={0.55}
+      backdropOpacity={0.25}
+      sheetStyle={isDark ? styles.sheetDark : undefined}
+      handleStyle={isDark ? styles.handleDark : undefined}
+    >
       {(close) => (
-        <View style={styles.container}>
-          <Text style={styles.title}>Select currency</Text>
+        <View style={[styles.container, isDark ? styles.containerDark : null]}>
+          <Text style={[styles.title, isDark ? styles.titleDark : null]}>Select currency</Text>
           <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
             {list.map((option) => {
               const isActive = option.code === selectedCurrency;
@@ -54,10 +62,14 @@ export function CurrencySheet({
                     onSelect(option.code);
                     close();
                   }}
-                  style={[styles.row, isActive ? styles.rowActive : null]}
+                  style={[
+                    styles.row,
+                    isDark ? styles.rowDark : null,
+                    isActive ? (isDark ? styles.rowActiveDark : styles.rowActive) : null,
+                  ]}
                 >
-                  <Text style={styles.code}>{option.code}</Text>
-                  <Text style={styles.name}>{option.name}</Text>
+                  <Text style={[styles.code, isDark ? styles.codeDark : null]}>{option.code}</Text>
+                  <Text style={[styles.name, isDark ? styles.nameDark : null]}>{option.name}</Text>
                 </Pressable>
               );
             })}
@@ -69,16 +81,28 @@ export function CurrencySheet({
 }
 
 const styles = StyleSheet.create({
+  sheetDark: {
+    backgroundColor: "#0B0F14",
+  },
+  handleDark: {
+    backgroundColor: "#4B5563",
+  },
   container: {
     paddingHorizontal: 18,
     paddingTop: 8,
     paddingBottom: 18,
     gap: 12,
   },
+  containerDark: {
+    backgroundColor: "#0B0F14",
+  },
   title: {
     fontSize: 16,
     fontWeight: "700",
     color: "#1F1F1F",
+  },
+  titleDark: {
+    color: "#F3F4F6",
   },
   list: {
     gap: 10,
@@ -96,13 +120,28 @@ const styles = StyleSheet.create({
   rowActive: {
     backgroundColor: "#DCE8C9",
   },
+  rowActiveDark: {
+    backgroundColor: "#30401F",
+    borderColor: "#5F6F2A",
+  },
+  rowDark: {
+    backgroundColor: "#1F2937",
+    borderWidth: 1,
+    borderColor: "#2F3A4A",
+  },
   code: {
     fontSize: 15,
     fontWeight: "700",
     color: "#1F1F1F",
   },
+  codeDark: {
+    color: "#F3F4F6",
+  },
   name: {
     fontSize: 13,
     color: "#4E4E4E",
+  },
+  nameDark: {
+    color: "#9CA3AF",
   },
 });

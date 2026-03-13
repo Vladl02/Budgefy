@@ -1,12 +1,18 @@
-import { Tabs } from "expo-router";
 import { AppDrawer } from "@/src/components/homepage/AppDrawer";
+import { useAppTheme } from "@/src/providers/AppThemeProvider";
+import { Tabs } from "expo-router";
 import { MyTabBar } from "../../components/TabBar";
 
 export default function TabLayout() {
+  const { appColors } = useAppTheme();
+
   return (
     <AppDrawer>
       <Tabs
-        screenOptions={{ headerShown: false }}
+        screenOptions={{
+        headerShown: false,
+        sceneStyle: { backgroundColor: appColors.background },
+      }}
         tabBar={(props) => <MyTabBar {...props} />}
       >
         <Tabs.Screen name="index" options={{ title: "Home" }} />

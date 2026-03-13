@@ -9,6 +9,7 @@ import {
   DollarSign,
   Flame,
   Languages,
+  Moon,
   Pencil,
   PiggyBank,
   Receipt,
@@ -21,17 +22,21 @@ import {
   X
 } from 'lucide-react-native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Animated, Image, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Animated, Image, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import { SlidingSheet } from '@/src/components/SlidingSheet';
 import { payments, users } from "@/src/db/schema";
 import { useGuardedModalPush } from '@/src/hooks/guardForModals';
 import { useAuth } from "@/src/providers/AuthProvider";
+import { useAppTheme } from "@/src/providers/AppThemeProvider";
 import {
   DEFAULT_BASE_CURRENCY,
   DEFAULT_LANGUAGE,
   getBaseCurrencyPreference,
+  getHomeLayoutStylePreference,
   getLanguagePreference,
+  type HomeLayoutStyle,
+  setHomeLayoutStylePreference,
 } from "@/src/utils/preferences";
 import { useFocusEffect } from "@react-navigation/native";
 import { eq } from "drizzle-orm";
@@ -52,7 +57,7 @@ type MonthlyPulseParticle = {
   peakOpacity: number;
 };
 
-const MONTHLY_PULSE_PARTICLES: ReadonlyArray<MonthlyPulseParticle> = [
+const MONTHLY_PULSE_PARTICLES: readonly MonthlyPulseParticle[] = [
   { left: "8%", top: "16%", size: 5, drift: 8, peakOpacity: 0.36 },
   { left: "14%", top: "38%", size: 3, drift: 7, peakOpacity: 0.24 },
   { left: "22%", top: "62%", size: 4, drift: 10, peakOpacity: 0.3 },
@@ -130,8 +135,10 @@ const languageFlag = (languageCode: string): string => {
 
 export default function Settings() {
   const insets = useSafeAreaInsets();
+  const { isDark, setMode } = useAppTheme();
   const [baseCurrencyCode, setBaseCurrencyCode] = useState(DEFAULT_BASE_CURRENCY);
   const [languageCode, setLanguageCode] = useState(DEFAULT_LANGUAGE);
+  const [homeLayoutStyle, setHomeLayoutStyle] = useState<HomeLayoutStyle>("grid");
   const baseCurrencyBadge = `${currencyFlag(baseCurrencyCode)} ${baseCurrencyCode}`;
   const languageBadge = `${languageFlag(languageCode)} ${languageCode}`;
   const listBottomPadding = insets.bottom + 92;
@@ -157,12 +164,14 @@ export default function Settings() {
   const db = drizzle(dbExpo);
   const loadPreferences = useCallback(async () => {
     try {
-      const [storedCurrency, storedLanguage] = await Promise.all([
+      const [storedCurrency, storedLanguage, storedHomeLayoutStyle] = await Promise.all([
         getBaseCurrencyPreference(dbExpo),
         getLanguagePreference(dbExpo),
+        getHomeLayoutStylePreference(dbExpo),
       ]);
       setBaseCurrencyCode(storedCurrency.toUpperCase());
       setLanguageCode(storedLanguage.toUpperCase());
+      setHomeLayoutStyle(storedHomeLayoutStyle);
     } catch (error) {
       console.error("Failed to load app preferences", error);
     }
@@ -427,6 +436,21 @@ export default function Settings() {
     setActiveOption(option);
     setSheetVisible(true);
   };
+  const handleToggleDarkMode = useCallback(
+    (enabled: boolean) => {
+      setMode(enabled ? "dark" : "light");
+    },
+    [setMode],
+  );
+  const handleHomeLayoutStyleChange = useCallback(
+    (nextLayoutStyle: HomeLayoutStyle) => {
+      setHomeLayoutStyle(nextLayoutStyle);
+      void setHomeLayoutStylePreference(dbExpo, nextLayoutStyle).catch((error) => {
+        console.error("Failed to persist home layout style", error);
+      });
+    },
+    [dbExpo],
+  );
 
   const handleSignOut = async () => {
     try {
@@ -491,7 +515,7 @@ export default function Settings() {
     const month = streakMonth.getMonth();
     const firstDay = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const cells: Array<{ day: number | null; key: string }> = [];
+    const cells: { day: number | null; key: string }[] = [];
 
     for (let i = 0; i < firstDay; i += 1) cells.push({ day: null, key: `empty-start-${i}` });
     for (let day = 1; day <= daysInMonth; day += 1) cells.push({ day, key: `day-${day}` });
@@ -568,10 +592,80 @@ export default function Settings() {
       case "Category Manager":
         return (
           <View style={{ padding: 20 }}>
-            <Text style={{ fontSize: 18, fontWeight: "600", alignSelf: "center" }}>Category Manager</Text>
-            <Text style={{ marginTop: 8, alignSelf: "center"}}>Arrange your categories here.</Text>
+            <Text
+              style={{
+                fontSize: 18,
+                fontWeight: "600",
+                alignSelf: "center",
+                color: isDark ? "#F9FAFB" : "#111827",
+              }}
+            >
+              Category Manager
+            </Text>
+            <Text
+              style={{
+                marginTop: 8,
+                alignSelf: "center",
+                color: isDark ? "#9CA3AF" : "#4B5563",
+              }}
+            >
+              Choose how categories are shown on Home.
+            </Text>
+
+            <View
+              style={{
+                marginTop: 18,
+                borderRadius: 14,
+                borderWidth: 1,
+                borderColor: isDark ? "#374151" : "#E5E7EB",
+                backgroundColor: isDark ? "#1F2937" : "#F8FAFC",
+                padding: 4,
+                flexDirection: "row",
+                gap: 6,
+              }}
+            >
+              {(["grid", "masonry"] as const).map((layoutOption) => {
+                const isActive = homeLayoutStyle === layoutOption;
+                return (
+                  <Pressable
+                    key={layoutOption}
+                    style={{
+                      flex: 1,
+                      minHeight: 40,
+                      borderRadius: 10,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      backgroundColor: isActive ? "#111827" : "transparent",
+                    }}
+                    onPress={() => handleHomeLayoutStyleChange(layoutOption)}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 13,
+                        fontWeight: "700",
+                        color: isActive ? "#FFFFFF" : isDark ? "#D1D5DB" : "#4B5563",
+                      }}
+                    >
+                      {layoutOption === "grid" ? "Grid" : "Masonry"}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <Text
+              style={{
+                marginTop: 10,
+                color: isDark ? "#9CA3AF" : "#6B7280",
+                fontSize: 12,
+                alignSelf: "center",
+              }}
+            >
+              Grid = equal cards, Masonry = staggered card heights.
+            </Text>
+
             <Pressable onPress={close} style={{ marginTop: 20, alignSelf: "flex-end" }}>
-              <Text>Close</Text>
+              <Text style={{ color: isDark ? "#E5E7EB" : "#111827" }}>Close</Text>
             </Pressable>
           </View>
         );
@@ -739,15 +833,15 @@ export default function Settings() {
   ];
 
   return (
-    <Pressable style={styles.screen} onPress={Keyboard.dismiss}>
+    <Pressable style={[styles.screen, isDark ? styles.screenDark : null]} onPress={Keyboard.dismiss}>
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingBottom: listBottomPadding }]}
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.pageHeaderRow}>
-          <Text style={styles.pageTitle}>Settings</Text>
-          <Pressable onPress={() => void handleSignOut()} style={styles.signOutButton}>
-            <Text style={styles.signOutButtonText}>Sign out</Text>
+          <Text style={[styles.pageTitle, isDark ? styles.pageTitleDark : null]}>Settings</Text>
+          <Pressable onPress={() => void handleSignOut()} style={[styles.signOutButton, isDark ? styles.signOutButtonDark : null]}>
+            <Text style={[styles.signOutButtonText, isDark ? styles.signOutButtonTextDark : null]}>Sign out</Text>
           </Pressable>
         </View>
 
@@ -956,33 +1050,65 @@ export default function Settings() {
           }}
         >
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Preferences</Text>
-          <Text style={styles.sectionSubtitle}>Manage budgeting, language, and app behavior</Text>
+          <Text style={[styles.sectionTitle, isDark ? styles.sectionTitleDark : null]}>Preferences</Text>
+          <Text style={[styles.sectionSubtitle, isDark ? styles.sectionSubtitleDark : null]}>
+            Manage budgeting, language, and app behavior
+          </Text>
         </View>
 
-        <View style={styles.optionsSection}>
+        <View style={[styles.optionsSection, isDark ? styles.optionsSectionDark : null]}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.optionCard,
+              isDark ? styles.optionCardDark : null,
+              pressed ? styles.optionCardPressed : null,
+            ]}
+            onPressIn={triggerSelectionHaptic}
+            onPress={() => {
+              triggerLightImpact();
+              handleToggleDarkMode(!isDark);
+            }}
+          >
+            <View style={[styles.optionIconBubble, isDark ? styles.optionIconBubbleDark : null]}>
+              <Moon size={20} color={isDark ? "#FDE68A" : "#374151"} strokeWidth={2.8} />
+            </View>
+            <Text style={[styles.optionText, isDark ? styles.optionTextDark : null]}>Dark Mode</Text>
+            <View style={styles.optionSwitchWrap}>
+              <Switch
+                value={isDark}
+                onValueChange={handleToggleDarkMode}
+                trackColor={{ false: "#D1D5DB", true: "#4B5563" }}
+                thumbColor="#FFFFFF"
+                ios_backgroundColor="#D1D5DB"
+              />
+            </View>
+          </Pressable>
           {settingsOptions.map((option) => {
             const IconComp = option.icon;
             return (
               <Pressable
                 key={option.key}
-                style={({ pressed }) => [styles.optionCard, pressed ? styles.optionCardPressed : null]}
+                style={({ pressed }) => [
+                  styles.optionCard,
+                  isDark ? styles.optionCardDark : null,
+                  pressed ? styles.optionCardPressed : null,
+                ]}
                 onPressIn={triggerSelectionHaptic}
                 onPress={() => {
                   triggerLightImpact();
                   option.onPress();
                 }}
               >
-                <View style={styles.optionIconBubble}>
+                <View style={[styles.optionIconBubble, isDark ? styles.optionIconBubbleDark : null]}>
                   <IconComp size={20} color={option.color} strokeWidth={2.8} />
                 </View>
-                <Text style={styles.optionText}>{option.label}</Text>
+                <Text style={[styles.optionText, isDark ? styles.optionTextDark : null]}>{option.label}</Text>
                 {"value" in option && option.value ? (
-                  <View style={styles.optionValuePill}>
-                    <Text style={styles.optionValueText}>{option.value}</Text>
+                  <View style={[styles.optionValuePill, isDark ? styles.optionValuePillDark : null]}>
+                    <Text style={[styles.optionValueText, isDark ? styles.optionValueTextDark : null]}>{option.value}</Text>
                   </View>
                 ) : null}
-                <ChevronRight size={18} style={styles.optionChevron} />
+                <ChevronRight size={18} style={styles.optionChevron} color={isDark ? "#9CA3AF" : "#6B7280"} />
               </Pressable>
             );
           })}
@@ -1293,12 +1419,16 @@ export default function Settings() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#F3F4F6" },
+  screenDark: { backgroundColor: "#0B0F14" },
   scrollContent: { paddingHorizontal: 12, paddingTop: 54 },
   pageTitle: {
     fontSize: 32,
     color: "#111827",
     fontFamily: "Inter_700Bold",
     marginLeft: 4,
+  },
+  pageTitleDark: {
+    color: "#F9FAFB",
   },
   pageHeaderRow: {
     flexDirection: "row",
@@ -1314,10 +1444,17 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     backgroundColor: "#FFFFFF",
   },
+  signOutButtonDark: {
+    backgroundColor: "#111827",
+    borderColor: "#374151",
+  },
   signOutButtonText: {
     color: "#111827",
     fontSize: 12,
     fontFamily: "Inter_600SemiBold",
+  },
+  signOutButtonTextDark: {
+    color: "#F9FAFB",
   },
   profileCard: {
     width: "100%",
@@ -1580,11 +1717,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: "Inter_600SemiBold",
   },
+  sectionTitleDark: {
+    color: "#F9FAFB",
+  },
   sectionSubtitle: {
     color: "#6B7280",
     fontSize: 12,
     marginTop: 2,
     fontFamily: "Inter_400Regular",
+  },
+  sectionSubtitleDark: {
+    color: "#9CA3AF",
   },
   optionsSection: {
     marginBottom: 30,
@@ -1594,15 +1737,23 @@ const styles = StyleSheet.create({
     borderColor: "#E5E7EB",
     overflow: "hidden",
   },
-optionCard: {
-  minHeight: 60,
-  backgroundColor: "#fff",
-  paddingHorizontal: 14,
-  flexDirection: "row",
-  alignItems: "center",
-  borderBottomWidth: 1,
-  borderBottomColor: "#F3F4F6",
-},
+  optionsSectionDark: {
+    backgroundColor: "#111827",
+    borderColor: "#374151",
+  },
+  optionCard: {
+    minHeight: 60,
+    backgroundColor: "#fff",
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6",
+  },
+  optionCardDark: {
+    backgroundColor: "#111827",
+    borderBottomColor: "#1F2937",
+  },
   optionCardPressed: {
     transform: [{ scale: 0.992 }],
     backgroundColor: "#F9FAFB",
@@ -1618,10 +1769,20 @@ optionCard: {
     justifyContent: "center",
     marginRight: 12,
   },
+  optionIconBubbleDark: {
+    backgroundColor: "#1F2937",
+    borderColor: "#374151",
+  },
   optionText: {
     color: "#111827",
     fontSize: 15,
     fontFamily: "Inter_500Medium",
+  },
+  optionTextDark: {
+    color: "#F3F4F6",
+  },
+  optionSwitchWrap: {
+    marginLeft: "auto",
   },
   optionValuePill: {
     marginLeft: "auto",
@@ -1633,10 +1794,17 @@ optionCard: {
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
+  optionValuePillDark: {
+    backgroundColor: "#1F2937",
+    borderColor: "#374151",
+  },
   optionValueText: {
     color: "#111827",
     fontSize: 12,
     fontFamily: "Inter_600SemiBold",
+  },
+  optionValueTextDark: {
+    color: "#E5E7EB",
   },
   optionChevron: {
     opacity: 0.8,
@@ -2089,4 +2257,3 @@ optionCard: {
     fontFamily: "Inter_700Bold",
   },
 });
-

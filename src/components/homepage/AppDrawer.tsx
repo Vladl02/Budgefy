@@ -1,6 +1,7 @@
 import { router, type Href } from "expo-router";
 import React, { createContext, useContext, useMemo, useRef } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useAppTheme } from "@/src/providers/AppThemeProvider";
 
 import ReanimatedDrawerLayout, {
     DrawerPosition,
@@ -22,6 +23,7 @@ export function useAppDrawer() {
 }
 
 export function AppDrawer({ children }: { children: React.ReactNode }) {
+  const { isDark } = useAppTheme();
   const drawerRef = useRef<DrawerLayoutMethods | null>(null);
 
   const api = useMemo(
@@ -38,11 +40,11 @@ export function AppDrawer({ children }: { children: React.ReactNode }) {
   };
 
   const renderDrawerContent = () => (
-    <View style={styles.drawer}>
-      <Text style={styles.title}>Menu</Text>
+    <View style={[styles.drawer, isDark ? styles.drawerDark : null]}>
+      <Text style={[styles.title, isDark ? styles.titleDark : null]}>Menu</Text>
 
       <Pressable style={styles.item} onPress={() => goModal("/(modals)/help")}>
-        <Text style={styles.itemText}>Help</Text>
+        <Text style={[styles.itemText, isDark ? styles.itemTextDark : null]}>Help</Text>
       </Pressable>
     </View>
   );
@@ -71,7 +73,12 @@ const styles = StyleSheet.create({
     paddingTop: 48,
     paddingHorizontal: 16,
   },
+  drawerDark: {
+    backgroundColor: "#111827",
+  },
   title: { fontSize: 18, fontWeight: "700", marginBottom: 16 },
+  titleDark: { color: "#F3F4F6" },
   item: { paddingVertical: 12 },
   itemText: { fontSize: 16 },
+  itemTextDark: { color: "#E5E7EB" },
 });

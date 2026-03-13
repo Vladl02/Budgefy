@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useAppTheme } from "@/src/providers/AppThemeProvider";
 
 type TagSearchModalProps = {
   visible: boolean;
@@ -27,6 +28,7 @@ export function TagSearchModal({
   addLabel = "Add",
   closeOnAdd = true,
 }: TagSearchModalProps) {
+  const { isDark } = useAppTheme();
   const [query, setQuery] = useState("");
 
   useEffect(() => {
@@ -53,18 +55,18 @@ export function TagSearchModal({
   return (
     <Modal transparent visible={visible} animationType="fade" onRequestClose={onDismiss}>
       <View style={styles.root}>
-        <Pressable style={styles.backdrop} onPress={onDismiss} />
+        <Pressable style={[styles.backdrop, isDark ? styles.backdropDark : null]} onPress={onDismiss} />
 
-        <View style={styles.card}>
-          <Text style={styles.title}>{title}</Text>
+        <View style={[styles.card, isDark ? styles.cardDark : null]}>
+          <Text style={[styles.title, isDark ? styles.titleDark : null]}>{title}</Text>
 
           <View style={styles.searchRow}>
             <TextInput
               value={query}
               onChangeText={setQuery}
               placeholder={placeholder}
-              placeholderTextColor="#9A9A9A"
-              style={styles.input}
+              placeholderTextColor={isDark ? "#9CA3AF" : "#9A9A9A"}
+              style={[styles.input, isDark ? styles.inputDark : null]}
               autoCorrect={false}
             />
             <Pressable
@@ -84,11 +86,11 @@ export function TagSearchModal({
             keyboardShouldPersistTaps="handled"
           >
             {filtered.length === 0 ? (
-              <Text style={styles.emptyText}>No matches</Text>
+              <Text style={[styles.emptyText, isDark ? styles.emptyTextDark : null]}>No matches</Text>
             ) : (
               filtered.map((item) => (
-                <Pressable key={item} style={styles.listItem} onPress={() => setQuery(item)}>
-                  <Text style={styles.listText}>{item}</Text>
+                <Pressable key={item} style={[styles.listItem, isDark ? styles.listItemDark : null]} onPress={() => setQuery(item)}>
+                  <Text style={[styles.listText, isDark ? styles.listTextDark : null]}>{item}</Text>
                 </Pressable>
               ))
             )}
@@ -110,6 +112,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#000000",
     opacity: 0.45,
   },
+  backdropDark: {
+    opacity: 0.55,
+  },
   card: {
     width: "86%",
     maxHeight: "70%",
@@ -122,11 +127,19 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     elevation: 6,
   },
+  cardDark: {
+    backgroundColor: "#111827",
+    borderWidth: 1,
+    borderColor: "#2F3A4A",
+  },
   title: {
     fontSize: 16,
     fontWeight: "700",
     color: "#1F1F1F",
     marginBottom: 10,
+  },
+  titleDark: {
+    color: "#F3F4F6",
   },
   searchRow: {
     flexDirection: "row",
@@ -142,6 +155,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     fontSize: 14,
     color: "#1F1F1F",
+  },
+  inputDark: {
+    backgroundColor: "#1F2937",
+    color: "#F3F4F6",
+    borderWidth: 1,
+    borderColor: "#374151",
   },
   addButton: {
     height: 40,
@@ -176,14 +195,25 @@ const styles = StyleSheet.create({
     backgroundColor: "#F6F6F6",
     marginBottom: ITEM_GAP,
   },
+  listItemDark: {
+    backgroundColor: "#1F2937",
+    borderWidth: 1,
+    borderColor: "#374151",
+  },
   listText: {
     color: "#2A2A2A",
     fontSize: 14,
+  },
+  listTextDark: {
+    color: "#E5E7EB",
   },
   emptyText: {
     color: "#888888",
     fontSize: 13,
     textAlign: "center",
     paddingVertical: 12,
+  },
+  emptyTextDark: {
+    color: "#9CA3AF",
   },
 });

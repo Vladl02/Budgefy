@@ -13,14 +13,19 @@ export type ExpenseItem = {
   icon?: LucideIcon;
   name: string;
   iconColor?: string;
+  budgetUsageRatio?: number | null;
+  trendPercent?: number | null;
   kind?: "category" | "add";
 };
+
+export type HomeLayoutStyle = "grid" | "masonry";
 
 type ExpenseGridProps = {
   items: ExpenseItem[];
   onPressItem?: (item: ExpenseItem) => void;
   onLongPressItem?: (item: ExpenseItem) => void;
   onDeleteItem?: (item: ExpenseItem) => void;
+  layoutStyle?: HomeLayoutStyle;
   isEditing?: boolean;
   shakeAnim?: Animated.AnimatedInterpolation<string>;
   onReorderPreview?: (nextCategoryIds: string[]) => void;
@@ -34,6 +39,16 @@ const ITEM_GAP_RIGHT = 14;
 const ITEM_GAP_BOTTOM = 12;
 const GRID_PADDING_X = 16;
 const GRID_PADDING_Y = 8;
+const GRID_CONTENT_WIDTH =
+  GRID_COLUMNS * ITEM_WIDTH + (GRID_COLUMNS - 1) * ITEM_GAP_RIGHT + GRID_PADDING_X * 2;
+const MASONRY_COLUMNS = 2;
+const MASONRY_ITEM_WIDTH = 154;
+const MASONRY_ITEM_GAP_RIGHT = 14;
+const MASONRY_ITEM_GAP_BOTTOM = 14;
+const MASONRY_CONTENT_WIDTH =
+  MASONRY_COLUMNS * MASONRY_ITEM_WIDTH + (MASONRY_COLUMNS - 1) * MASONRY_ITEM_GAP_RIGHT + GRID_PADDING_X * 2;
+const MASONRY_ITEM_HEIGHTS = [132, 174, 148, 186];
+const MASONRY_ADD_ITEM_HEIGHT = 132;
 
 const clamp = (value: number, min: number, max: number): number =>
   Math.max(min, Math.min(max, value));
@@ -43,6 +58,7 @@ export function ExpenseGrid({
   onPressItem,
   onLongPressItem,
   onDeleteItem,
+  layoutStyle = "grid",
   isEditing = false,
   shakeAnim,
   onReorderPreview,
@@ -57,6 +73,9 @@ export function ExpenseGrid({
   const shiftValuesRef = React.useRef<Record<string, Animated.ValueXY>>({});
   const [draggingCategoryId, setDraggingCategoryId] = React.useState<string | null>(null);
   const [dragPreviewOrderIds, setDragPreviewOrderIds] = React.useState<string[] | null>(null);
+  const effectiveLayout: HomeLayoutStyle = isEditing ? "grid" : layoutStyle;
+  const isMasonryLayout = effectiveLayout === "masonry";
+  const activeColumns = isMasonryLayout ? MASONRY_COLUMNS : GRID_COLUMNS;
 
   const categoryItems = React.useMemo(
     () => items.filter((item) => item.kind === "category"),
@@ -315,24 +334,45 @@ export function ExpenseGrid({
     }
   }, [dragScale, dragTranslate, isEditing]);
 
+  React.useEffect(() => {
+    if (!isMasonryLayout) return;
+    setDraggingCategoryId(null);
+    setDragPreviewOrderIds(null);
+    dragTranslate.setValue({ x: 0, y: 0 });
+    dragScale.setValue(1);
+    startCategoryIndexRef.current = -1;
+    targetCategoryIndexRef.current = -1;
+  }, [dragScale, dragTranslate, isMasonryLayout]);
+
   return (
     <FlatList
+      key={effectiveLayout}
       data={items}
       keyExtractor={(item) => item.id}
-      numColumns={GRID_COLUMNS}
+      numColumns={activeColumns}
       renderItem={({ item, index }) => (
         (() => {
           const isCategory = item.kind === "category";
           const isDragging = draggingCategoryId === item.id;
-          const canDrag = isEditing && isCategory && (Boolean(onReorderPreview) || Boolean(onReorderCommit));
+          const canDrag =
+            !isMasonryLayout &&
+            isEditing &&
+            isCategory &&
+            (Boolean(onReorderPreview) || Boolean(onReorderCommit));
           const panResponder = canDrag ? getStablePanResponder(item.id) : null;
-          const shiftValue = isCategory ? getShiftValue(item.id) : null;
+          const shiftValue = !isMasonryLayout && isCategory ? getShiftValue(item.id) : null;
+          const cardHeight = isMasonryLayout
+            ? item.kind === "add"
+              ? MASONRY_ADD_ITEM_HEIGHT
+              : MASONRY_ITEM_HEIGHTS[index % MASONRY_ITEM_HEIGHTS.length]
+            : ITEM_HEIGHT;
+          const cardWidth = isMasonryLayout ? MASONRY_ITEM_WIDTH : ITEM_WIDTH;
 
           const transform: NonNullable<TransformsStyle["transform"]>[number][] = [];
-          if (isCategory && isEditing && shakeAnim && !isDragging) {
+          if (!isMasonryLayout && isCategory && isEditing && shakeAnim && !isDragging) {
             transform.push({ rotate: shakeAnim });
           }
-          if (isCategory && isEditing && !isDragging && shiftValue) {
+          if (!isMasonryLayout && isCategory && isEditing && !isDragging && shiftValue) {
             transform.push({ translateX: shiftValue.x });
             transform.push({ translateY: shiftValue.y });
           }
@@ -346,7 +386,13 @@ export function ExpenseGrid({
             <Animated.View
               style={[
                 styles.item,
-                index % GRID_COLUMNS !== GRID_COLUMNS - 1 ? styles.itemGapRight : null,
+                index % activeColumns !== activeColumns - 1
+                  ? isMasonryLayout
+                    ? styles.itemGapRightMasonry
+                    : styles.itemGapRight
+                  : null,
+                isMasonryLayout ? styles.itemMasonry : null,
+                { marginBottom: isMasonryLayout ? MASONRY_ITEM_GAP_BOTTOM : ITEM_GAP_BOTTOM },
                 isDragging ? styles.draggingItem : null,
                 transform.length > 0 ? ({ transform } as any) : null,
               ]}
@@ -359,8 +405,12 @@ export function ExpenseGrid({
                 icon={item.icon}
                 name={item.name}
                 iconColor={item.iconColor}
+                budgetUsageRatio={item.budgetUsageRatio}
+                trendPercent={item.trendPercent}
                 isAddCard={item.kind === "add"}
                 isEditing={item.kind === "category" && isEditing}
+                cardWidth={cardWidth}
+                cardHeight={cardHeight}
                 onPress={
                   isEditing && isCategory
                     ? undefined
@@ -377,17 +427,24 @@ export function ExpenseGrid({
           );
         })()
       )}
-      columnWrapperStyle={styles.row}
-      contentContainerStyle={styles.content}
+      columnWrapperStyle={isMasonryLayout ? styles.rowMasonry : styles.row}
+      contentContainerStyle={[
+        styles.content,
+        {
+          width: isMasonryLayout ? MASONRY_CONTENT_WIDTH : GRID_CONTENT_WIDTH,
+        },
+      ]}
       showsVerticalScrollIndicator={false}
       pointerEvents={isEditing ? "box-none" : "auto"}
-      scrollEnabled={!isEditing || draggingCategoryId === null}
+      scrollEnabled={!isEditing || isMasonryLayout || draggingCategoryId === null}
     />
   );
 }
 
 const styles = StyleSheet.create({
   content: {
+    maxWidth: "100%",
+    alignSelf: "center",
     paddingHorizontal: 16,
     paddingVertical: 8,
   },
@@ -399,6 +456,15 @@ const styles = StyleSheet.create({
   },
   itemGapRight: {
     marginRight: ITEM_GAP_RIGHT,
+  },
+  rowMasonry: {
+    justifyContent: "flex-start",
+  },
+  itemMasonry: {
+    alignSelf: "flex-start",
+  },
+  itemGapRightMasonry: {
+    marginRight: MASONRY_ITEM_GAP_RIGHT,
   },
   draggingItem: {
     zIndex: 100,

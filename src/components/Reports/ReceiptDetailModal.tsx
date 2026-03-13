@@ -36,6 +36,51 @@ import { SelectionModal } from "./SelectionModal";
 import { SimpleDatePickerModal } from "./SimpleDatePickerModal";
 
 const CURRENCY_OPTIONS = ["USD", "EUR", "RON", "GBP"];
+const DATE_METHOD_SEPARATOR = " - ";
+
+const parseAmountInput = (rawAmount: string): number => {
+  const sanitized = rawAmount.replace(/\s/g, "").replace(/[^\d,.-]/g, "");
+  if (!sanitized) return 0;
+
+  const lastComma = sanitized.lastIndexOf(",");
+  const lastDot = sanitized.lastIndexOf(".");
+  let normalized = sanitized;
+
+  if (lastComma >= 0 && lastDot >= 0) {
+    if (lastComma > lastDot) {
+      normalized = sanitized.replace(/\./g, "").replace(",", ".");
+    } else {
+      normalized = sanitized.replace(/,/g, "");
+    }
+  } else if (lastComma >= 0) {
+    normalized = sanitized.replace(",", ".");
+  }
+
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const parseDateOnly = (value: string): Date | null => {
+  if (!value) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [yearRaw, monthRaw, dayRaw] = value.split("-");
+    const year = Number.parseInt(yearRaw, 10);
+    const month = Number.parseInt(monthRaw, 10);
+    const day = Number.parseInt(dayRaw, 10);
+    const parsed = new Date(year, month - 1, day);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const formatIsoDate = (date: Date): string => {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+};
 
 type ReceiptDetailModalProps = {
   visible: boolean;
@@ -75,11 +120,11 @@ function ReceiptDetailModal({
   useEffect(() => {
     if (item) {
       setName(item.title);
-      const rawPrice = item.amount.replace(/[^0-9.]/g, "");
-      setPrice(rawPrice);
+      const parsedPrice = parseAmountInput(item.amount);
+      setPrice(parsedPrice > 0 ? parsedPrice.toString() : "");
       const detectedCurrency = item.currency || (item.amount.includes("RON") ? "RON" : "USD");
       setCurrency(detectedCurrency);
-      setDateVal(item.fullDate || "2025-12-31");
+      setDateVal(item.fullDate || formatIsoDate(new Date()));
       setCategory(item.category || "General");
       setIsFullPage(item.fullPage || false);
       setComment(item.comment || "");
@@ -96,12 +141,12 @@ function ReceiptDetailModal({
     STATUS_CONFIG[(item?.status as keyof typeof STATUS_CONFIG) ?? "processed"] ?? STATUS_CONFIG.processed;
 
   const isValid = useMemo(() => {
-    const num = parseFloat(price || "0");
+    const num = parseAmountInput(price);
     return name.trim().length > 0 && !Number.isNaN(num) && num >= 0 && !!dateVal;
   }, [name, price, dateVal]);
   const dateDisplay = useMemo(() => {
-    const parsed = new Date(dateVal);
-    if (Number.isNaN(parsed.getTime())) {
+    const parsed = parseDateOnly(dateVal);
+    if (!parsed) {
       return { primary: dateVal || "Select date", secondary: "Tap to choose" };
     }
     return {
@@ -116,17 +161,18 @@ function ReceiptDetailModal({
       return;
     }
 
-    const numericPrice = parseFloat(price || "0");
+    const numericPrice = parseAmountInput(price);
     const formattedAmount = `${currency} ${numericPrice.toFixed(2)}`;
 
-    const dateObj = new Date(dateVal);
+    const dateObj = parseDateOnly(dateVal) ?? new Date();
     const shortDate = dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    const normalizedFullDate = formatIsoDate(dateObj);
 
     const updatedItem: ReceiptItem = {
       ...item,
       title: name,
-      fullDate: dateVal,
-      date: `${shortDate} · ${currency}`,
+      fullDate: normalizedFullDate,
+      date: `${shortDate}${DATE_METHOD_SEPARATOR}${currency}`,
       amount: formattedAmount,
       currency,
       category,
@@ -284,7 +330,7 @@ function ReceiptDetailModal({
             <View style={{ flex: 1 }}>
               <Text style={editStyles.summaryLabel}>Amount</Text>
               <Text style={editStyles.summaryAmount}>
-                {currency} {Number(parseFloat(price || "0")).toFixed(2)}
+                {currency} {parseAmountInput(price).toFixed(2)}
               </Text>
 
               <View style={editStyles.pillsRow}>
@@ -366,7 +412,7 @@ function ReceiptDetailModal({
                   style={editStyles.input}
                   value={price}
                   onChangeText={setPrice}
-                  keyboardType="numeric"
+                  keyboardType="decimal-pad"
                   placeholder="0.00"
                   placeholderTextColor="#A1A1AA"
                 />

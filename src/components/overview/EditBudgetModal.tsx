@@ -19,6 +19,7 @@ import {
 } from "react-native";
 import { Plus, Trash2, X, Check, ArrowLeft, Grid } from "lucide-react-native";
 import { CATEGORY_STYLES, IconKey } from "@/src/components/overview/category";
+import { useAppTheme } from "@/src/providers/AppThemeProvider";
 
 // Enable LayoutAnimation for Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -60,6 +61,7 @@ const PRESET_COLORS = [
 const CATEGORY_KEYS = Object.keys(CATEGORY_STYLES) as IconKey[];
 
 export default function EditBudgetModal({ visible, onClose, initialItems, onSave }: Props) {
+  const { isDark } = useAppTheme();
   const [localItems, setLocalItems] = useState<SummaryItem[]>([]);
   
   // Interaction State
@@ -234,14 +236,19 @@ export default function EditBudgetModal({ visible, onClose, initialItems, onSave
       <TouchableOpacity 
         activeOpacity={0.7}
         onPress={() => startEditing(item)}
-        style={[styles.itemCard, isEditingThis && styles.itemCardEditing]}
+        style={[
+          styles.itemCard,
+          isDark ? styles.itemCardDark : null,
+          isEditingThis && styles.itemCardEditing,
+          isEditingThis && isDark ? styles.itemCardEditingDark : null,
+        ]}
       >
         <View style={[styles.iconWrapper, { backgroundColor: activeColor + "20" }]}>
           <IconComponent size={20} color={activeColor} strokeWidth={2.5} />
         </View>
         <View style={styles.itemTextContainer}>
-          <Text style={styles.itemTitle}>{item.title}</Text>
-          <Text style={styles.itemBudget}>Budget: ${item.budget.toFixed(2)}</Text>
+          <Text style={[styles.itemTitle, isDark ? styles.itemTitleDark : null]}>{item.title}</Text>
+          <Text style={[styles.itemBudget, isDark ? styles.itemBudgetDark : null]}>Budget: ${item.budget.toFixed(2)}</Text>
         </View>
         
         {isEditingThis ? (
@@ -269,7 +276,8 @@ export default function EditBudgetModal({ visible, onClose, initialItems, onSave
       */}
       <Animated.View 
         style={[
-          styles.modalContainer, 
+          styles.modalContainer,
+          isDark ? styles.modalContainerDark : null,
           { 
             transform: [{ translateY: panY }],
             paddingBottom: keyboardPadding 
@@ -278,13 +286,13 @@ export default function EditBudgetModal({ visible, onClose, initialItems, onSave
       >
         
           <View {...panResponder.panHandlers}>
-            <View style={styles.grabberBarContainer}>
-                <View style={styles.grabberBar} />
+            <View style={[styles.grabberBarContainer, isDark ? styles.grabberBarContainerDark : null]}>
+                <View style={[styles.grabberBar, isDark ? styles.grabberBarDark : null]} />
             </View>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Edit Budget</Text>
-              <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-                <X size={24} color={THEME.textSecondary} />
+            <View style={[styles.modalHeader, isDark ? styles.modalHeaderDark : null]}>
+              <Text style={[styles.modalTitle, isDark ? styles.modalTitleDark : null]}>Edit Budget</Text>
+              <TouchableOpacity onPress={onClose} style={[styles.closeButton, isDark ? styles.closeButtonDark : null]}>
+                <X size={24} color={isDark ? "#9CA3AF" : THEME.textSecondary} />
               </TouchableOpacity>
             </View>
           </View>
@@ -300,20 +308,20 @@ export default function EditBudgetModal({ visible, onClose, initialItems, onSave
             keyboardShouldPersistTaps="handled" // Crucial for interacting with the form
             ListFooterComponent={
                 <TouchableOpacity 
-                    style={styles.addCard} 
+                    style={[styles.addCard, isDark ? styles.addCardDark : null]}
                     onPress={startAdding}
                     activeOpacity={0.6}
                 >
                     <View style={styles.addIconWrapper}>
-                        <Plus size={22} color={THEME.textSecondary} />
+                        <Plus size={22} color={isDark ? "#9CA3AF" : THEME.textSecondary} />
                     </View>
-                    <Text style={styles.addCardText}>Add New Category</Text>
+                    <Text style={[styles.addCardText, isDark ? styles.addCardTextDark : null]}>Add New Category</Text>
                 </TouchableOpacity>
             }
           />
 
           {/* Bottom Panel sits at the bottom of the "Safe" area (above keyboard) */}
-          <View style={styles.bottomPanel}>
+          <View style={[styles.bottomPanel, isDark ? styles.bottomPanelDark : null]}>
             
             {!isFormVisible ? (
                 // State A: Idle
@@ -337,10 +345,10 @@ export default function EditBudgetModal({ visible, onClose, initialItems, onSave
                             }} 
                             style={styles.backButton}
                         >
-                            <ArrowLeft size={20} color={THEME.textPrimary} />
-                            <Text style={styles.backText}>Back</Text>
+                            <ArrowLeft size={20} color={isDark ? "#F3F4F6" : THEME.textPrimary} />
+                            <Text style={[styles.backText, isDark ? styles.backTextDark : null]}>Back</Text>
                         </TouchableOpacity>
-                        <Text style={styles.panelTitle}>
+                        <Text style={[styles.panelTitle, isDark ? styles.panelTitleDark : null]}>
                             {viewMode === 'iconPicker' ? "Select Icon" : (editingId ? "Edit Category" : "New Category")}
                         </Text>
                         <View style={{width: 60}} /> 
@@ -358,14 +366,18 @@ export default function EditBudgetModal({ visible, onClose, initialItems, onSave
                                         return (
                                             <TouchableOpacity 
                                                 key={key}
-                                                style={[styles.gridItem, isSelected && { backgroundColor: selectedColor + '15', borderColor: selectedColor }]}
+                                                style={[
+                                                  styles.gridItem,
+                                                  isDark ? styles.gridItemDark : null,
+                                                  isSelected && { backgroundColor: selectedColor + '15', borderColor: selectedColor },
+                                                ]}
                                                 onPress={() => {
                                                     setSelectedIconKey(key);
                                                     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
                                                     setViewMode('form');
                                                 }}
                                             >
-                                                <IconComp size={24} color={isSelected ? selectedColor : THEME.textSecondary} />
+                                                <IconComp size={24} color={isSelected ? selectedColor : isDark ? "#9CA3AF" : THEME.textSecondary} />
                                             </TouchableOpacity>
                                         )
                                     })}
@@ -401,7 +413,11 @@ export default function EditBudgetModal({ visible, onClose, initialItems, onSave
                                             <TouchableOpacity 
                                                 key={color} 
                                                 onPress={() => setSelectedColor(color)}
-                                                style={[styles.swatch, isSelected && { borderColor: color, backgroundColor: color + '10', transform: [{scale: 1.1}] }]}
+                                                style={[
+                                                  styles.swatch,
+                                                  isDark ? styles.swatchDark : null,
+                                                  isSelected && { borderColor: color, backgroundColor: color + '10', transform: [{scale: 1.1}] },
+                                                ]}
                                             >
                                                 <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: color }} />
                                             </TouchableOpacity>
@@ -412,17 +428,17 @@ export default function EditBudgetModal({ visible, onClose, initialItems, onSave
                             
                             <View style={styles.inputRow}>
                                 <TextInput
-                                    style={[styles.modernInput, { flex: 2 }]}
+                                    style={[styles.modernInput, isDark ? styles.modernInputDark : null, { flex: 2 }]}
                                     placeholder="Name"
-                                    placeholderTextColor={THEME.textSecondary}
+                                    placeholderTextColor={isDark ? "#6B7280" : THEME.textSecondary}
                                     value={name}
                                     onChangeText={setName}
                                     autoFocus={true} 
                                 />
                                 <TextInput
-                                    style={[styles.modernInput, { flex: 1 }]}
+                                    style={[styles.modernInput, isDark ? styles.modernInputDark : null, { flex: 1 }]}
                                     placeholder="$0"
-                                    placeholderTextColor={THEME.textSecondary}
+                                    placeholderTextColor={isDark ? "#6B7280" : THEME.textSecondary}
                                     keyboardType="numeric"
                                     value={amount}
                                     onChangeText={setAmount}
@@ -449,13 +465,19 @@ export default function EditBudgetModal({ visible, onClose, initialItems, onSave
 const styles = StyleSheet.create({
   // Main container needs background
   modalContainer: { flex: 1, backgroundColor: THEME.background },
+  modalContainerDark: { backgroundColor: "#0B0F14" },
   
   grabberBarContainer: { alignItems: 'center', paddingVertical: 12, backgroundColor: THEME.background },
+  grabberBarContainerDark: { backgroundColor: "#0B0F14" },
   grabberBar: { width: 40, height: 5, backgroundColor: THEME.borderColor, borderRadius: 3 },
+  grabberBarDark: { backgroundColor: "#4B5563" },
   
   modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 24, paddingBottom: 20, backgroundColor: THEME.background },
+  modalHeaderDark: { backgroundColor: "#0B0F14" },
   modalTitle: { fontSize: 24, fontWeight: "800", color: THEME.textPrimary },
+  modalTitleDark: { color: "#F3F4F6" },
   closeButton: { padding: 4, backgroundColor: THEME.secondaryBackground, borderRadius: 20 },
+  closeButtonDark: { backgroundColor: "#1F2937" },
   
   listContent: { paddingHorizontal: 20, paddingBottom: 20 }, 
   
@@ -466,11 +488,21 @@ const styles = StyleSheet.create({
     borderRadius: 16, borderWidth: 1, borderColor: THEME.borderColor,
     shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 8, elevation: 1,
   },
+  itemCardDark: {
+    backgroundColor: "#111827",
+    borderColor: "#374151",
+  },
   itemCardEditing: { borderColor: THEME.primary, backgroundColor: THEME.secondaryBackground },
+  itemCardEditingDark: {
+    borderColor: "#9CA3AF",
+    backgroundColor: "#1F2937",
+  },
   iconWrapper: { width: 40, height: 40, borderRadius: 12, justifyContent: "center", alignItems: "center", marginRight: 16 },
   itemTextContainer: { flex: 1 },
   itemTitle: { fontSize: 17, fontWeight: "600", color: THEME.textPrimary, marginBottom: 2 },
+  itemTitleDark: { color: "#F3F4F6" },
   itemBudget: { fontSize: 14, fontWeight: "500", color: THEME.textSecondary },
+  itemBudgetDark: { color: "#9CA3AF" },
   deleteIconButton: { padding: 10, backgroundColor: THEME.danger + '15', borderRadius: 12 },
   
   editingBadge: { backgroundColor: THEME.primary + '20', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
@@ -482,19 +514,30 @@ const styles = StyleSheet.create({
       borderRadius: 16, padding: 16, marginTop: 4, marginBottom: 20,
       justifyContent: 'center', backgroundColor: '#FAFAFA'
   },
+  addCardDark: {
+      borderColor: "#374151",
+      backgroundColor: "#111827",
+  },
   addIconWrapper: { marginRight: 8 },
   addCardText: { fontSize: 16, fontWeight: '600', color: THEME.textSecondary },
+  addCardTextDark: { color: "#9CA3AF" },
 
   bottomPanel: {
     padding: 24, backgroundColor: THEME.background,
     borderTopWidth: 1, borderTopColor: THEME.borderColor,
     paddingBottom: Platform.OS === 'ios' ? 24 : 24, // Reduced default padding since Animated View handles keyboard
   },
+  bottomPanelDark: {
+    backgroundColor: "#0B0F14",
+    borderTopColor: "#374151",
+  },
   
   panelHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   backButton: { flexDirection: 'row', alignItems: 'center', padding: 4 },
   backText: { marginLeft: 4, fontSize: 16, color: THEME.textPrimary, fontWeight: '600' },
+  backTextDark: { color: "#F3F4F6" },
   panelTitle: { fontSize: 16, fontWeight: "700", color: THEME.textPrimary },
+  panelTitleDark: { color: "#F3F4F6" },
 
   selectionRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
   iconSelector: {
@@ -514,12 +557,19 @@ const styles = StyleSheet.create({
       marginRight: 8, borderWidth: 1, borderColor: 'transparent',
       backgroundColor: '#F0F0F0'
   },
+  swatchDark: {
+      backgroundColor: "#1F2937",
+  },
 
   inputRow: { flexDirection: "row", gap: 12 },
   modernInput: {
     backgroundColor: THEME.secondaryBackground, borderRadius: 14,
     paddingHorizontal: 16, paddingVertical: 14,
     fontSize: 16, color: THEME.textPrimary,
+  },
+  modernInputDark: {
+    backgroundColor: "#1F2937",
+    color: "#F3F4F6",
   },
   actionButton: {
     backgroundColor: THEME.primary, borderRadius: 14, width: 54,
@@ -541,5 +591,9 @@ const styles = StyleSheet.create({
       width: '18%', aspectRatio: 1, 
       justifyContent: 'center', alignItems: 'center',
       margin: '1%', borderRadius: 12, borderWidth: 1, borderColor: 'transparent'
+  },
+  gridItemDark: {
+      backgroundColor: "#111827",
+      borderColor: "#374151",
   },
 });

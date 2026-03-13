@@ -1,3 +1,4 @@
+import { useAppTheme } from "@/src/providers/AppThemeProvider";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import {
@@ -9,9 +10,9 @@ import {
   GraduationCap,
   Heart,
   Home, // Work/Salary
-  Music, // Education
-  PiggyBank,
-  PawPrint, // Health
+  Music,
+  PawPrint, // Education
+  PiggyBank, // Health
   Plane,
   ShoppingBag,
   ShoppingCart, // Subscriptions
@@ -143,6 +144,7 @@ export default function CategoryCard({
   onBudgetPress,
   onPress,
 }: CategoryCardProps) {
+  const { isDark } = useAppTheme();
   const remaining = Math.max(budget - spent, 0);
   const progress = budget > 0 ? Math.min(spent / budget, 1) : 0;
   const formatAmount = (value: number) =>
@@ -153,15 +155,18 @@ export default function CategoryCard({
   const IconComponent = style.Icon;
 
   return (
-    <Pressable style={({ pressed }) => [styles.card, pressed ? styles.cardPressed : null]} onPress={onPress}>
+    <Pressable
+      style={({ pressed }) => [styles.card, isDark ? styles.cardDark : null, pressed ? styles.cardPressed : null]}
+      onPress={onPress}
+    >
       <View style={styles.topRow}>
         <View style={styles.leftTop}>
           <View style={[styles.iconContainer, { backgroundColor: `${activeColor}20` }]}>
             <IconComponent size={22} strokeWidth={2.5} color={activeColor} />
           </View>
           <View style={styles.titleRow}>
-            <Text style={styles.titleText}>{title}</Text>
-            <ChevronRight size={16} strokeWidth={3} color="#374151" />
+            <Text style={[styles.titleText, isDark ? styles.titleTextDark : null]}>{title}</Text>
+            <ChevronRight size={16} strokeWidth={3} color={isDark ? "#9CA3AF" : "#374151"} />
           </View>
         </View>
         <Pressable
@@ -177,11 +182,11 @@ export default function CategoryCard({
       </View>
 
       <View style={styles.midRow}>
-        <Text style={styles.meta}>
-          Spent: <Text style={styles.metaBold}>${formatAmount(spent)}</Text>
+        <Text style={[styles.meta, isDark ? styles.metaDark : null]}>
+          Spent: <Text style={[styles.metaBold, isDark ? styles.metaBoldDark : null]}>${formatAmount(spent)}</Text>
         </Text>
-        <Text style={styles.meta}>
-          Remaining: <Text style={styles.metaBold}>${formatAmount(remaining)}</Text>
+        <Text style={[styles.meta, isDark ? styles.metaDark : null]}>
+          Remaining: <Text style={[styles.metaBold, isDark ? styles.metaBoldDark : null]}>${formatAmount(remaining)}</Text>
         </Text>
       </View>
 
@@ -198,7 +203,7 @@ export default function CategoryCard({
             },
           ]}
         />
-        <View style={styles.progressTrack}>
+        <View style={[styles.progressTrack, isDark ? styles.progressTrackDark : null]}>
           <View
             style={[
               styles.progressFill,
@@ -231,6 +236,10 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 4,
   },
+  cardDark: {
+    backgroundColor: "#111827",
+    borderColor: "#374151",
+  },
   cardPressed: {
     transform: [{ scale: 0.992 }],
     opacity: 0.94,
@@ -257,6 +266,9 @@ const styles = StyleSheet.create({
     color: "#111827",
     marginRight: 4,
     flexShrink: 1,
+  },
+  titleTextDark: {
+    color: "#F3F4F6",
   },
   budgetPill: {
     backgroundColor: "#111827",
@@ -287,9 +299,15 @@ const styles = StyleSheet.create({
     color: "#4B5563",
     fontWeight: "600",
   },
+  metaDark: {
+    color: "#9CA3AF",
+  },
   metaBold: {
     color: "#111827",
     fontWeight: "800",
+  },
+  metaBoldDark: {
+    color: "#F9FAFB",
   },
   progressWrapper: {
     position: "relative",
@@ -311,6 +329,9 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: "#ECEFF5",
     overflow: "hidden",
+  },
+  progressTrackDark: {
+    backgroundColor: "#374151",
   },
   progressFill: {
     height: "100%",

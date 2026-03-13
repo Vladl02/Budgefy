@@ -1,4 +1,5 @@
 import { categories, payments, products, users } from "@/src/db/schema";
+import { useAppTheme } from "@/src/providers/AppThemeProvider";
 import { and, desc, eq } from "drizzle-orm";
 import { drizzle, useLiveQuery } from "drizzle-orm/expo-sqlite";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -28,6 +29,7 @@ const toDate = (value: Date | number | string | null): Date | null => {
 };
 
 export default function CategoryItemsScreen() {
+  const { isDark } = useAppTheme();
   const router = useRouter();
   const params = useLocalSearchParams<{ categoryId?: string | string[]; categoryName?: string | string[] }>();
   const rawCategoryId = Array.isArray(params.categoryId) ? params.categoryId[0] : params.categoryId;
@@ -104,24 +106,28 @@ export default function CategoryItemsScreen() {
   );
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, isDark ? styles.screenDark : null]}>
       <View style={styles.header}>
-        <Pressable style={styles.backBtn} onPress={() => router.back()}>
-          <ArrowLeft size={18} color="#111827" />
+        <Pressable style={[styles.backBtn, isDark ? styles.backBtnDark : null]} onPress={() => router.back()}>
+          <ArrowLeft size={18} color={isDark ? "#F3F4F6" : "#111827"} />
         </Pressable>
         <View style={styles.headerTextWrap}>
-          <Text style={styles.headerTitle}>{resolvedCategoryName}</Text>
-          <Text style={styles.headerSubtitle}>Purchased items for this category</Text>
+          <Text style={[styles.headerTitle, isDark ? styles.headerTitleDark : null]}>{resolvedCategoryName}</Text>
+          <Text style={[styles.headerSubtitle, isDark ? styles.headerSubtitleDark : null]}>
+            Purchased items for this category
+          </Text>
         </View>
       </View>
 
-      <View style={styles.summaryCard}>
+      <View style={[styles.summaryCard, isDark ? styles.summaryCardDark : null]}>
         <View style={[styles.summaryDot, { backgroundColor: resolvedCategoryColor }]} />
         <View style={{ flex: 1 }}>
-          <Text style={styles.summaryLabel}>Total tracked spend</Text>
-          <Text style={styles.summaryValue}>{formatPrice(totalSpentCents)}</Text>
+          <Text style={[styles.summaryLabel, isDark ? styles.summaryLabelDark : null]}>Total tracked spend</Text>
+          <Text style={[styles.summaryValue, isDark ? styles.summaryValueDark : null]}>{formatPrice(totalSpentCents)}</Text>
         </View>
-        <Text style={styles.summaryCount}>{itemsData.length} item{itemsData.length === 1 ? "" : "s"}</Text>
+        <Text style={[styles.summaryCount, isDark ? styles.summaryCountDark : null]}>
+          {itemsData.length} item{itemsData.length === 1 ? "" : "s"}
+        </Text>
       </View>
 
       <FlatList
@@ -131,8 +137,10 @@ export default function CategoryItemsScreen() {
         ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>No items yet</Text>
-            <Text style={styles.emptyText}>Add expenses in this category to see item details here.</Text>
+            <Text style={[styles.emptyTitle, isDark ? styles.emptyTitleDark : null]}>No items yet</Text>
+            <Text style={[styles.emptyText, isDark ? styles.emptyTextDark : null]}>
+              Add expenses in this category to see item details here.
+            </Text>
           </View>
         }
         renderItem={({ item }) => {
@@ -142,19 +150,21 @@ export default function CategoryItemsScreen() {
             : "Unknown date";
 
           return (
-            <View style={styles.itemCard}>
+            <View style={[styles.itemCard, isDark ? styles.itemCardDark : null]}>
               <View style={styles.itemTopRow}>
-                <Text style={styles.itemName} numberOfLines={1}>
+                <Text style={[styles.itemName, isDark ? styles.itemNameDark : null]} numberOfLines={1}>
                   {item.name || "Expense"}
                 </Text>
-                <Text style={styles.itemPrice}>{formatPrice(Number(item.priceCents ?? 0))}</Text>
+                <Text style={[styles.itemPrice, isDark ? styles.itemPriceDark : null]}>
+                  {formatPrice(Number(item.priceCents ?? 0))}
+                </Text>
               </View>
               <View style={styles.itemMetaRow}>
-                <Text style={styles.itemDate}>{dateLabel}</Text>
+                <Text style={[styles.itemDate, isDark ? styles.itemMetaDark : null]}>{dateLabel}</Text>
                 {item.marketName ? (
                   <View style={styles.storeWrap}>
-                    <Store size={12} color="#6B7280" />
-                    <Text style={styles.itemStore} numberOfLines={1}>
+                    <Store size={12} color={isDark ? "#9CA3AF" : "#6B7280"} />
+                    <Text style={[styles.itemStore, isDark ? styles.itemMetaDark : null]} numberOfLines={1}>
                       {item.marketName}
                     </Text>
                   </View>
@@ -174,6 +184,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#F6F7FB",
     paddingTop: 52,
   },
+  screenDark: {
+    backgroundColor: "#0B0F14",
+  },
   header: {
     paddingHorizontal: 14,
     flexDirection: "row",
@@ -190,6 +203,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginRight: 10,
   },
+  backBtnDark: {
+    backgroundColor: "#111827",
+    borderColor: "#374151",
+  },
   headerTextWrap: {
     flex: 1,
   },
@@ -198,11 +215,17 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#111827",
   },
+  headerTitleDark: {
+    color: "#F9FAFB",
+  },
   headerSubtitle: {
     marginTop: 2,
     fontSize: 12,
     fontWeight: "500",
     color: "#6B7280",
+  },
+  headerSubtitleDark: {
+    color: "#9CA3AF",
   },
   summaryCard: {
     marginTop: 14,
@@ -217,6 +240,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
   },
+  summaryCardDark: {
+    backgroundColor: "#111827",
+    borderColor: "#374151",
+  },
   summaryDot: {
     width: 12,
     height: 12,
@@ -227,16 +254,25 @@ const styles = StyleSheet.create({
     color: "#6B7280",
     fontWeight: "600",
   },
+  summaryLabelDark: {
+    color: "#9CA3AF",
+  },
   summaryValue: {
     marginTop: 2,
     fontSize: 16,
     color: "#111827",
     fontWeight: "800",
   },
+  summaryValueDark: {
+    color: "#F9FAFB",
+  },
   summaryCount: {
     fontSize: 12,
     fontWeight: "700",
     color: "#374151",
+  },
+  summaryCountDark: {
+    color: "#D1D5DB",
   },
   listContent: {
     paddingHorizontal: 14,
@@ -251,6 +287,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 12,
   },
+  itemCardDark: {
+    backgroundColor: "#111827",
+    borderColor: "#374151",
+  },
   itemTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -263,10 +303,16 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#111827",
   },
+  itemNameDark: {
+    color: "#F3F4F6",
+  },
   itemPrice: {
     fontSize: 14,
     fontWeight: "800",
     color: "#111827",
+  },
+  itemPriceDark: {
+    color: "#F9FAFB",
   },
   itemMetaRow: {
     marginTop: 7,
@@ -291,6 +337,9 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#6B7280",
   },
+  itemMetaDark: {
+    color: "#9CA3AF",
+  },
   emptyState: {
     marginTop: 50,
     alignItems: "center",
@@ -302,11 +351,17 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#111827",
   },
+  emptyTitleDark: {
+    color: "#F3F4F6",
+  },
   emptyText: {
     marginTop: 6,
     textAlign: "center",
     fontSize: 12,
     fontWeight: "500",
     color: "#6B7280",
+  },
+  emptyTextDark: {
+    color: "#9CA3AF",
   },
 });

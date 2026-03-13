@@ -1,7 +1,13 @@
+import { LinearGradient } from "expo-linear-gradient";
 import type { LucideIcon } from "lucide-react-native";
 import { Plus, X } from "lucide-react-native";
 import React from "react";
 import { Pressable, StyleSheet, Text, type GestureResponderEvent, View } from "react-native";
+import Svg, { Circle } from "react-native-svg";
+import { useAppTheme } from "@/src/providers/AppThemeProvider";
+
+const DEFAULT_CARD_WIDTH = 106;
+const DEFAULT_CARD_HEIGHT = 140;
 
 type ExpenseBoxProps = {
   amount?: string | number;
@@ -10,8 +16,12 @@ type ExpenseBoxProps = {
   icon?: LucideIcon;
   name: string;
   iconColor?: string;
+  budgetUsageRatio?: number | null;
+  trendPercent?: number | null;
   isAddCard?: boolean;
   isEditing?: boolean;
+  cardWidth?: number;
+  cardHeight?: number;
   onPress?: () => void;
   onLongPress?: () => void;
   onDelete?: () => void;
@@ -23,14 +33,41 @@ export default function ExpenseBox({
   circleColor,
   icon: Icon,
   name,
-  iconColor = "#2E2E2E",
+  iconColor = "#1F2937",
+  budgetUsageRatio = null,
+  trendPercent = null,
   isAddCard = false,
   isEditing = false,
+  cardWidth = DEFAULT_CARD_WIDTH,
+  cardHeight = DEFAULT_CARD_HEIGHT,
   onPress,
   onLongPress,
   onDelete,
 }: ExpenseBoxProps) {
+  const { isDark } = useAppTheme();
   const didLongPress = React.useRef(false);
+  const ringSize = 52;
+  const ringStrokeWidth = 3;
+  const ringRadius = (ringSize - ringStrokeWidth) / 2;
+  const ringCircumference = 2 * Math.PI * ringRadius;
+  const hasBudgetProgress = typeof budgetUsageRatio === "number" && Number.isFinite(budgetUsageRatio);
+  const clampedProgress = hasBudgetProgress
+    ? Math.max(0, Math.min(budgetUsageRatio as number, 1))
+    : 0;
+  const progressDashOffset = ringCircumference * (1 - clampedProgress);
+  const progressOpacity = hasBudgetProgress ? Math.max(0.2, clampedProgress) : 0;
+  const trackOpacity = hasBudgetProgress ? 0.14 : 0;
+  const ringColor = circleColor ?? iconColor;
+  const hasTrend = typeof trendPercent === "number" && Number.isFinite(trendPercent);
+  const absTrendPercent = hasTrend ? Math.min(999, Math.round(Math.abs(trendPercent as number))) : 0;
+  const isTrendUp = hasTrend ? (trendPercent as number) > 0.4 : false;
+  const isTrendDown = hasTrend ? (trendPercent as number) < -0.4 : false;
+  const trendArrow = isTrendUp ? "↑" : isTrendDown ? "↓" : "→";
+  const trendColor = isTrendUp ? "#EF4444" : isTrendDown ? "#10B981" : isDark ? "#9CA3AF" : "#6B7280";
+  const trendBgColor = isDark ? "rgba(17,24,39,0.62)" : "rgba(255,255,255,0.74)";
+
+  const cardTint = backgroundColor ?? (isDark ? "rgba(25,32,45,0.7)" : "rgba(248,249,252,0.75)");
+  const iconBadgeColor = circleColor ?? (isDark ? "rgba(31,41,55,0.6)" : "rgba(255,255,255,0.58)");
 
   const handlePress = (event: GestureResponderEvent) => {
     event.stopPropagation();
@@ -47,29 +84,71 @@ export default function ExpenseBox({
     onLongPress?.();
   };
 
-  const handleAddCardPress = (event: GestureResponderEvent) => {
-    event.stopPropagation();
-    onPress?.();
+  const renderGlassLayers = () => (
+    <>
+      <View style={[styles.tintLayer, { backgroundColor: cardTint }]} />
+      <LinearGradient
+        pointerEvents="none"
+        colors={
+          isDark
+            ? ["rgba(255,255,255,0.08)", "rgba(255,255,255,0.02)"]
+            : ["rgba(255,255,255,0.64)", "rgba(255,255,255,0.18)"]
+        }
+        style={styles.glassGradient}
+      />
+    </>
+  );
+
+  const renderIcon = () => {
+    if (!Icon) return null;
+    return (
+      <View style={styles.duotoneIconWrap}>
+        <Icon size={22} color={iconColor} strokeWidth={1.7} opacity={0.3} />
+        <View style={styles.duotoneIconTop}>
+          <Icon size={18} color={iconColor} strokeWidth={2.15} />
+        </View>
+      </View>
+    );
   };
 
   if (isAddCard) {
     return (
       <Pressable
-        onPress={handleAddCardPress}
-        style={({ pressed }) => [styles.container, styles.addContainer, pressed ? styles.addPressed : null]}
+        onPress={(event) => {
+          event.stopPropagation();
+          onPress?.();
+        }}
+        style={({ pressed }) => [
+          styles.container,
+          { width: cardWidth, height: cardHeight },
+          styles.cardBase,
+          isDark ? styles.cardBaseDark : styles.cardBaseLight,
+          styles.addCard,
+          pressed ? styles.cardPressed : null,
+        ]}
       >
-        <Text style={styles.addTitle}>{name}</Text>
-        <View style={styles.addIconCircle}>
-          <Plus size={20} color="#111827" />
+        {renderGlassLayers()}
+        <View style={[styles.addPlusCircle, isDark ? styles.addPlusCircleDark : null]}>
+          <Plus size={20} color={isDark ? "#E5E7EB" : "#1F2937"} />
         </View>
-        <Text style={styles.addHint}>Tap to create</Text>
+        <Text style={[styles.addTitle, isDark ? styles.addTitleDark : null]} numberOfLines={2}>
+          {name}
+        </Text>
       </Pressable>
     );
   }
 
   if (isEditing) {
     return (
-      <View style={[styles.container, { backgroundColor: backgroundColor ?? "#F5F5F5" }]}>
+      <View
+        style={[
+          styles.container,
+          { width: cardWidth, height: cardHeight },
+          styles.cardBase,
+          isDark ? styles.cardBaseDark : styles.cardBaseLight,
+        ]}
+      >
+        {renderGlassLayers()}
         <Pressable
           style={styles.deleteButton}
           hitSlop={10}
@@ -80,11 +159,41 @@ export default function ExpenseBox({
         >
           <X size={11} color="#FFFFFF" strokeWidth={3} />
         </Pressable>
-        <Text style={styles.name}>{name}</Text>
-        <View style={[styles.iconCircle, { backgroundColor: circleColor ?? "#E5E7EB" }]}>
-          {Icon ? <Icon size={20} color={iconColor} /> : null}
+        <Text style={[styles.name, isDark ? styles.textDark : null]} numberOfLines={2}>
+          {name}
+        </Text>
+        <View style={styles.iconRingWrap}>
+          {hasBudgetProgress ? (
+            <Svg width={ringSize} height={ringSize} style={styles.progressRing}>
+              <Circle
+                cx={ringSize / 2}
+                cy={ringSize / 2}
+                r={ringRadius}
+                stroke={ringColor}
+                strokeOpacity={trackOpacity}
+                strokeWidth={ringStrokeWidth}
+                fill="none"
+              />
+              <Circle
+                cx={ringSize / 2}
+                cy={ringSize / 2}
+                r={ringRadius}
+                stroke={ringColor}
+                strokeOpacity={progressOpacity}
+                strokeWidth={ringStrokeWidth}
+                strokeLinecap="round"
+                strokeDasharray={`${ringCircumference} ${ringCircumference}`}
+                strokeDashoffset={progressDashOffset}
+                fill="none"
+                transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
+              />
+            </Svg>
+          ) : null}
+          <View style={[styles.iconCircle, { backgroundColor: iconBadgeColor }]}>{renderIcon()}</View>
         </View>
-        <Text style={styles.amount}>${amount ?? 0}</Text>
+        <Text style={[styles.amount, isDark ? styles.textDark : null]} numberOfLines={1}>
+          ${amount ?? 0}
+        </Text>
       </View>
     );
   }
@@ -96,15 +205,55 @@ export default function ExpenseBox({
       delayLongPress={220}
       style={({ pressed }) => [
         styles.container,
-        { backgroundColor: backgroundColor ?? "#F5F5F5" },
+        { width: cardWidth, height: cardHeight },
+        styles.cardBase,
+        isDark ? styles.cardBaseDark : styles.cardBaseLight,
         pressed ? styles.cardPressed : null,
       ]}
     >
-      <Text style={styles.name}>{name}</Text>
-      <View style={[styles.iconCircle, { backgroundColor: circleColor ?? "#E5E7EB" }]}>
-        {Icon ? <Icon size={20} color={iconColor} /> : null}
+      {renderGlassLayers()}
+      {hasTrend ? (
+        <View style={[styles.trendBadge, { backgroundColor: trendBgColor }]}>
+          <Text style={[styles.trendBadgeText, { color: trendColor }]}>
+            {trendArrow} {absTrendPercent}%
+          </Text>
+        </View>
+      ) : null}
+      <Text style={[styles.name, isDark ? styles.textDark : null]} numberOfLines={2}>
+        {name}
+      </Text>
+      <View style={styles.iconRingWrap}>
+        {hasBudgetProgress ? (
+          <Svg width={ringSize} height={ringSize} style={styles.progressRing}>
+            <Circle
+              cx={ringSize / 2}
+              cy={ringSize / 2}
+              r={ringRadius}
+              stroke={ringColor}
+              strokeOpacity={trackOpacity}
+              strokeWidth={ringStrokeWidth}
+              fill="none"
+            />
+            <Circle
+              cx={ringSize / 2}
+              cy={ringSize / 2}
+              r={ringRadius}
+              stroke={ringColor}
+              strokeOpacity={progressOpacity}
+              strokeWidth={ringStrokeWidth}
+              strokeLinecap="round"
+              strokeDasharray={`${ringCircumference} ${ringCircumference}`}
+              strokeDashoffset={progressDashOffset}
+              fill="none"
+              transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
+            />
+          </Svg>
+        ) : null}
+        <View style={[styles.iconCircle, { backgroundColor: iconBadgeColor }]}>{renderIcon()}</View>
       </View>
-      <Text style={styles.amount}>${amount ?? 0}</Text>
+      <Text style={[styles.amount, isDark ? styles.textDark : null]} numberOfLines={1}>
+        ${amount ?? 0}
+      </Text>
     </Pressable>
   );
 }
@@ -112,17 +261,49 @@ export default function ExpenseBox({
 const styles = StyleSheet.create({
   container: {
     position: "relative",
-    width: 106,
-    height: 140,
-    borderRadius: 18,
+    width: DEFAULT_CARD_WIDTH,
+    height: DEFAULT_CARD_HEIGHT,
+    borderRadius: 22,
+    borderCurve: "continuous",
     paddingVertical: 12,
     paddingHorizontal: 10,
     alignItems: "center",
     justifyContent: "space-between",
+    overflow: "hidden",
+  },
+  cardBase: {
+    borderWidth: 1,
+  },
+  cardBaseLight: {
+    borderColor: "rgba(255,255,255,0.6)",
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.08,
+    shadowRadius: 20,
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    elevation: 6,
+  },
+  cardBaseDark: {
+    borderColor: "rgba(255,255,255,0.08)",
+    shadowColor: "#000000",
+    shadowOpacity: 0.24,
+    shadowRadius: 20,
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    elevation: 8,
+  },
+  tintLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  glassGradient: {
+    ...StyleSheet.absoluteFillObject,
   },
   cardPressed: {
-    opacity: 0.9,
-    transform: [{ scale: 0.985 }],
+    transform: [{ scale: 0.98 }],
   },
   deleteButton: {
     position: "absolute",
@@ -136,52 +317,94 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  addContainer: {
-    backgroundColor: "#FFFFFF",
+  trendBadge: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    zIndex: 9,
+    paddingHorizontal: 6,
+    height: 18,
+    borderRadius: 9,
     borderWidth: 1,
-    borderColor: "#D1D5DB",
-    borderStyle: "dashed",
+    borderColor: "rgba(148,163,184,0.24)",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  addPressed: {
-    opacity: 0.9,
-    transform: [{ scale: 0.98 }],
+  trendBadgeText: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 10,
+    letterSpacing: 0.2,
+  },
+  addCard: {
+    justifyContent: "center",
+    gap: 12,
+  },
+  addPlusCircle: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "rgba(255,255,255,0.55)",
+    borderWidth: 1,
+    borderColor: "rgba(17,24,39,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  addPlusCircleDark: {
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(255,255,255,0.14)",
   },
   addTitle: {
+    fontFamily: "Inter_500Medium",
     fontSize: 12,
-    fontWeight: "700",
-    color: "#111827",
+    color: "#374151",
     textAlign: "center",
+    lineHeight: 15,
   },
-  addIconCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#F3F4F6",
-    borderWidth: 1,
-    borderColor: "#D1D5DB",
-  },
-  addHint: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#6B7280",
+  addTitleDark: {
+    color: "#D1D5DB",
   },
   name: {
+    fontFamily: "Inter_500Medium",
     fontSize: 12,
-    fontWeight: "600",
+    lineHeight: 15,
     color: "#2B2B2B",
+    textAlign: "center",
   },
   iconCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: "center",
     justifyContent: "center",
   },
+  iconRingWrap: {
+    width: 52,
+    height: 52,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  progressRing: {
+    position: "absolute",
+  },
+  duotoneIconWrap: {
+    width: 24,
+    height: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  duotoneIconTop: {
+    position: "absolute",
+    top: 3,
+    left: 3,
+  },
   amount: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#2B2B2B",
+    fontFamily: "Inter_700Bold",
+    fontSize: 16,
+    color: "#1F2937",
+    fontVariant: ["tabular-nums"],
+    letterSpacing: 0.15,
+  },
+  textDark: {
+    color: "#F3F4F6",
   },
 });

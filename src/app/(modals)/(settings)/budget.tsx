@@ -10,10 +10,12 @@ import { SlidingSheet } from "@/src/components/SlidingSheet";
 import MonthlySummaryCard from "@/src/components/overview/donutCard";
 import EditBudgetModal, { SummaryItem } from "@/src/components/overview/EditBudgetModal";
 import { resolveCategoryIconKey, type IconKey } from "@/src/components/overview/category";
+import { useAppTheme } from "@/src/providers/AppThemeProvider";
 import { categoriesForMonth, paymentSumsByCategory } from "@/src/utils/queries";
 import { useBudgetStore } from "@/src/stores/budgetStore";
 
 export default function BudgetSheet() {
+  const { isDark } = useAppTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const dbExpo = useSQLiteContext();
@@ -78,10 +80,16 @@ export default function BudgetSheet() {
 
   return (
     <View style={styles.screenWrapper}>
-      <SlidingSheet onDismiss={handleDismiss} heightPercent={0.68} backdropOpacity={0.4}>
+      <SlidingSheet
+        onDismiss={handleDismiss}
+        heightPercent={0.68}
+        backdropOpacity={0.4}
+        sheetStyle={isDark ? styles.sheetContainerDark : undefined}
+        handleStyle={isDark ? styles.sheetHandleDark : undefined}
+      >
         {() => (
           <View style={styles.sheetContainer}>
-            <Text style={styles.sheetTitle}>Monthly Budget</Text>
+            <Text style={[styles.sheetTitle, isDark ? styles.sheetTitleDark : null]}>Monthly Budget</Text>
 
             <ScrollView
               style={styles.scroll}
@@ -142,6 +150,12 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingHorizontal: 16,
   },
+  sheetContainerDark: {
+    backgroundColor: "#0B0F14",
+  },
+  sheetHandleDark: {
+    backgroundColor: "#9CA3AF",
+  },
   scroll: {
     flex: 1,
   },
@@ -154,6 +168,9 @@ const styles = StyleSheet.create({
     color: "#1F1F1F",
     textAlign: "center",
     marginBottom: 8,
+  },
+  sheetTitleDark: {
+    color: "#F3F4F6",
   },
   headerComponent: {
     gap: 12,

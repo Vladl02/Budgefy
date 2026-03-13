@@ -2,6 +2,8 @@ import type { SQLiteDatabase } from "expo-sqlite";
 
 export const DEFAULT_BASE_CURRENCY = "USD";
 export const DEFAULT_LANGUAGE = "EN";
+export const DEFAULT_HOME_LAYOUT_STYLE = "grid";
+export type HomeLayoutStyle = "grid" | "masonry";
 
 const TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS app_preferences (
@@ -21,6 +23,7 @@ const UPSERT_SQL = `
 
 const KEY_BASE_CURRENCY = "base_currency";
 const KEY_LANGUAGE = "language";
+const KEY_HOME_LAYOUT_STYLE = "home_layout_style_v1";
 
 let hasEnsuredTable = false;
 
@@ -82,4 +85,13 @@ export async function getLanguagePreference(db: SQLiteDatabase): Promise<string>
 
 export async function setLanguagePreference(db: SQLiteDatabase, language: string): Promise<void> {
   await setPreference(db, KEY_LANGUAGE, language.toUpperCase());
+}
+
+export async function getHomeLayoutStylePreference(db: SQLiteDatabase): Promise<HomeLayoutStyle> {
+  const value = await getPreference(db, KEY_HOME_LAYOUT_STYLE, DEFAULT_HOME_LAYOUT_STYLE);
+  return value === "masonry" ? "masonry" : "grid";
+}
+
+export async function setHomeLayoutStylePreference(db: SQLiteDatabase, layout: HomeLayoutStyle): Promise<void> {
+  await setPreference(db, KEY_HOME_LAYOUT_STYLE, layout);
 }

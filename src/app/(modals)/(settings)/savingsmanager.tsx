@@ -57,7 +57,7 @@ const INITIAL_GOALS: Goal[] = [
   { id: "3", name: "Summer Trip", current: 800, target: 3000, color: "#FFC83C", iconName: "trend" },
 ];
 
-const HERO_PARTICLES: ReadonlyArray<HeroParticle> = [
+const HERO_PARTICLES: readonly HeroParticle[] = [
   { left: "8%", top: "16%", size: 5, drift: 8, peakOpacity: 0.36 },
   { left: "14%", top: "38%", size: 3, drift: 7, peakOpacity: 0.24 },
   { left: "22%", top: "62%", size: 4, drift: 10, peakOpacity: 0.3 },
