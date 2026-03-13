@@ -1,4 +1,6 @@
 import { seed } from "drizzle-seed";
+import { eq } from "drizzle-orm";
+import { DEFAULT_CATEGORY_CATALOG } from "../constants/defaultCategoryCatalog";
 import * as schema from "./schema";
 
 type SeedDb = Parameters<typeof seed>[0];
@@ -11,41 +13,12 @@ type SeedOptions = {
 const CURRENT_MONTH_START = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 const NOW = new Date();
 
-const CATEGORY_NAMES = [
-  "Groceries",
-  "Transport",
-  "Utilities",
-  "Health",
-  "Restaurants",
-  "Entertainment",
-  "Shopping",
-  "Education",
-  "Savings",
-];
-
-const CATEGORY_COLORS = [
-  "#00DDB7",
-  "#FFC83C",
-  "#36A8FF",
-  "#FF4752",
-  "#C48FEE",
-  "#FF9949",
-  "#5FFF94",
-  "#7D8CFF",
-  "#4FD27E",
-];
-
-const CATEGORY_ICONS = [
-  "ShoppingCart",
-  "Bus",
-  "Droplets",
-  "Utensils",
-  "Coffee",
-  "Film",
-  "Banknote",
-  "BookOpen",
-  "PiggyBank",
-];
+const CATEGORY_NAMES = DEFAULT_CATEGORY_CATALOG.map((item) => item.name);
+const CATEGORY_COLORS = DEFAULT_CATEGORY_CATALOG.map((item) => item.color);
+const CATEGORY_ICONS = DEFAULT_CATEGORY_CATALOG.map((item) => item.iconName);
+const CATEGORY_CATALOG_MAP = new Map(
+  DEFAULT_CATEGORY_CATALOG.map((item) => [item.name, item]),
+);
 
 const MARKET_NAMES = [
   "Walmart",
@@ -93,28 +66,27 @@ const OTHER_SUBCATEGORY_VALUES = [
   "Planned",
 ];
 
-const CATEGORY_SUBCATEGORY_PRESETS: Record<string, string[]> = {
-  Groceries: ["Food", "Snacks", "Drinks", "Household", "Health"],
-  Transport: ["Fuel", "Public Transit", "Ride Share", "Parking", "Maintenance"],
-  Utilities: ["Electricity", "Water", "Gas", "Internet", "Phone"],
-  Health: ["Medicine", "Doctor", "Supplements", "Therapy", "Dental"],
-  Restaurants: ["Breakfast", "Lunch", "Dinner", "Coffee", "Delivery"],
-  Entertainment: ["Cinema", "Streaming", "Games", "Events", "Books"],
-  Shopping: ["Clothes", "Electronics", "Home", "Gifts", "Accessories"],
-  Education: ["Books", "Courses", "Tuition", "Supplies", "Software"],
-  Savings: ["Emergency Fund", "Investments", "Retirement", "Travel", "Goals"],
-};
+const CATEGORY_SUBCATEGORY_PRESETS: Record<string, string[]> = Object.fromEntries(
+  DEFAULT_CATEGORY_CATALOG.map((item) => [item.name, item.subcategories]),
+);
 
 const CATEGORY_SHOP_PRESETS: Record<string, string[]> = {
-  Groceries: ["Walmart", "Target", "Costco", "Trader Joe's", "Whole Foods"],
-  Transport: ["Shell", "Uber", "Lyft", "Metro", "BP"],
-  Utilities: ["AT&T", "Verizon", "Comcast", "City Utilities", "Gas Company"],
-  Health: ["CVS", "Walgreens", "Kaiser", "Blue Cross", "Quest Diagnostics"],
-  Restaurants: ["McDonald's", "Chipotle", "Starbucks", "Subway", "Domino's"],
-  Entertainment: ["Netflix", "Spotify", "AMC", "Steam", "Apple TV"],
-  Shopping: ["Amazon", "Best Buy", "IKEA", "H&M", "Zara"],
-  Education: ["Udemy", "Coursera", "Barnes & Noble", "Khan Academy", "edX"],
-  Savings: ["Bank Transfer", "Brokerage", "Savings Account", "Robo Advisor", "Credit Union"],
+  "Groceries": ["Walmart", "Target", "Costco", "Trader Joe's", "Whole Foods"],
+  "Dining & Takeout": ["McDonald's", "KFC", "Subway", "Starbucks", "Domino's"],
+  "Transport": ["Shell", "BP", "Uber", "Lyft", "Metro"],
+  "Housing / Home": ["IKEA", "Home Depot", "Leroy Merlin", "JYSK", "Wayfair"],
+  "Bills & Utilities": ["AT&T", "Verizon", "Comcast", "City Utilities", "Gas Company"],
+  "Health & Medical": ["CVS", "Walgreens", "Blue Cross", "Kaiser", "Quest Diagnostics"],
+  "Personal Care & Beauty": ["Sephora", "Douglas", "DM", "Notino", "Ulta"],
+  "Shopping": ["Amazon", "Best Buy", "H&M", "Zara", "eMAG"],
+  "Entertainment": ["Netflix", "Spotify", "Steam", "HBO Max", "Apple TV"],
+  "Education": ["Udemy", "Coursera", "Barnes & Noble", "edX", "Khan Academy"],
+  "Work / Business": ["Google Workspace", "Microsoft", "Notion", "Figma", "AWS"],
+  "Financial": ["Revolut", "PayPal", "Bank Transfer", "Brokerage", "Wise"],
+  "Travel": ["Booking", "Airbnb", "Skyscanner", "Wizz Air", "Ryanair"],
+  "Family & Kids": ["Lego", "Chicco", "Smyths", "Mothercare", "Decathlon"],
+  "Pets": ["PetSmart", "Zooplus", "Petco", "Maxi Pet", "Animax"],
+  "Other": ["Misc Shop", "Marketplace", "Unknown", "Cash", "Other"],
 };
 
 const normalizePresetName = (value: string): string =>
@@ -153,8 +125,9 @@ export async function seedAppData(db: SeedDb, options: SeedOptions = {}): Promis
       },
       with: {
         categories: [
-          { weight: 0.5, count: [6] },
-          { weight: 0.35, count: [7] },
+          { weight: 0.2, count: [5] },
+          { weight: 0.35, count: [6] },
+          { weight: 0.3, count: [7] },
           { weight: 0.15, count: [8] },
         ],
       },
@@ -162,8 +135,8 @@ export async function seedAppData(db: SeedDb, options: SeedOptions = {}): Promis
     categories: {
       columns: {
         categoryName: funcs.valuesFromArray({ values: CATEGORY_NAMES, isUnique: true }),
-        color: funcs.valuesFromArray({ values: CATEGORY_COLORS, isUnique: true }),
-        icon: funcs.valuesFromArray({ values: CATEGORY_ICONS, isUnique: true }),
+        color: funcs.valuesFromArray({ values: CATEGORY_COLORS }),
+        icon: funcs.valuesFromArray({ values: CATEGORY_ICONS }),
         monthStart: funcs.date({
           minDate: CURRENT_MONTH_START,
           maxDate: CURRENT_MONTH_START,
@@ -171,9 +144,10 @@ export async function seedAppData(db: SeedDb, options: SeedOptions = {}): Promis
       },
       with: {
         payments: [
-          { weight: 0.5, count: [1] },
+          { weight: 0.45, count: [1] },
           { weight: 0.35, count: [2] },
           { weight: 0.15, count: [3] },
+          { weight: 0.05, count: [4] },
         ],
       },
     },
@@ -230,11 +204,28 @@ export async function seedAppData(db: SeedDb, options: SeedOptions = {}): Promis
 
   const categoriesData = await seededDb
     .select({
-      userId: schema.categories.userId,
+      id: schema.categories.id,
       categoryName: schema.categories.categoryName,
     })
     .from(schema.categories)
     .all();
+  const usersData = await seededDb
+    .select({ id: schema.users.id })
+    .from(schema.users)
+    .all();
+
+  for (const row of categoriesData) {
+    const catalogItem = CATEGORY_CATALOG_MAP.get(row.categoryName);
+    if (!catalogItem) continue;
+
+    await seededDb
+      .update(schema.categories)
+      .set({
+        color: catalogItem.color,
+        icon: catalogItem.iconName,
+      })
+      .where(eq(schema.categories.id, row.id));
+  }
 
   const now = new Date();
   const subcategoryMap = new Map<
@@ -260,36 +251,38 @@ export async function seedAppData(db: SeedDb, options: SeedOptions = {}): Promis
     }
   >();
 
-  for (const row of categoriesData) {
-    const subcategoryPresets = CATEGORY_SUBCATEGORY_PRESETS[row.categoryName] ?? [];
-    for (const presetName of subcategoryPresets) {
-      const normalizedName = normalizePresetName(presetName);
-      const key = `${row.userId}|${row.categoryName}|${normalizedName}`;
-      if (!subcategoryMap.has(key)) {
-        subcategoryMap.set(key, {
-          userId: row.userId,
-          categoryName: row.categoryName,
-          name: presetName,
-          normalizedName,
-          createdAt: now,
-          updatedAt: now,
-        });
+  for (const userRow of usersData) {
+    for (const categoryName of CATEGORY_NAMES) {
+      const subcategoryPresets = CATEGORY_SUBCATEGORY_PRESETS[categoryName] ?? [];
+      for (const presetName of subcategoryPresets) {
+        const normalizedName = normalizePresetName(presetName);
+        const key = `${userRow.id}|${categoryName}|${normalizedName}`;
+        if (!subcategoryMap.has(key)) {
+          subcategoryMap.set(key, {
+            userId: userRow.id,
+            categoryName,
+            name: presetName,
+            normalizedName,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
       }
-    }
 
-    const shopPresets = CATEGORY_SHOP_PRESETS[row.categoryName] ?? [];
-    for (const presetName of shopPresets) {
-      const normalizedName = normalizePresetName(presetName);
-      const key = `${row.userId}|${row.categoryName}|${normalizedName}`;
-      if (!shopMap.has(key)) {
-        shopMap.set(key, {
-          userId: row.userId,
-          categoryName: row.categoryName,
-          name: presetName,
-          normalizedName,
-          createdAt: now,
-          updatedAt: now,
-        });
+      const shopPresets = CATEGORY_SHOP_PRESETS[categoryName] ?? [];
+      for (const presetName of shopPresets) {
+        const normalizedName = normalizePresetName(presetName);
+        const key = `${userRow.id}|${categoryName}|${normalizedName}`;
+        if (!shopMap.has(key)) {
+          shopMap.set(key, {
+            userId: userRow.id,
+            categoryName,
+            name: presetName,
+            normalizedName,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
       }
     }
   }

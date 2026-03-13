@@ -1,4 +1,5 @@
 import type { SQLiteDatabase } from "expo-sqlite";
+import { DEFAULT_CATEGORY_CATALOG } from "@/src/constants/defaultCategoryCatalog";
 
 export const DEFAULT_SUBCATEGORY_OPTIONS = [
   "Food",
@@ -46,6 +47,7 @@ const categoryColorCache = {
 };
 const inFlightPreloads = new Map<string, Promise<void>>();
 let bootstrapRequest: Promise<void> | null = null;
+let ensureDefaultCatalogRequest: Promise<void> | null = null;
 const DEFAULT_CATEGORY_COLOR = "#36A8FF";
 
 export const normalizeRecommendationName = (value: string): string =>
@@ -156,6 +158,73 @@ const fetchPresetNames = async (
     console.error(`Failed loading preset names from ${tableName}:`, error);
     return [];
   }
+};
+
+const ensureDefaultSubcategoryCatalog = async (db: SQLiteDatabase): Promise<void> => {
+  if (ensureDefaultCatalogRequest) {
+    return ensureDefaultCatalogRequest;
+  }
+
+  ensureDefaultCatalogRequest = (async () => {
+    try {
+      const users = await db.getAllAsync<{ id: number }>(
+        `SELECT id FROM users ORDER BY id ASC`,
+      );
+
+      if (!users.length) {
+        return;
+      }
+
+      const now = Date.now();
+      const sentinelCategory = DEFAULT_CATEGORY_CATALOG[0];
+      const sentinelSubcategory = sentinelCategory?.subcategories[0] ?? null;
+      const sentinelNormalized = sentinelSubcategory
+        ? normalizeRecommendationName(sentinelSubcategory)
+        : null;
+
+      for (const user of users) {
+        if (!user?.id) continue;
+        if (sentinelCategory && sentinelSubcategory && sentinelNormalized) {
+          const sentinelRow = await db.getFirstAsync<{ id: number }>(
+            `SELECT id
+             FROM subcategory_presets
+             WHERE user_id = ? AND category_name = ? AND normalized_name = ? AND is_archived = 0
+             LIMIT 1`,
+            [user.id, sentinelCategory.name, sentinelNormalized],
+          );
+          if (sentinelRow?.id) {
+            continue;
+          }
+        }
+
+        for (const category of DEFAULT_CATEGORY_CATALOG) {
+          for (const subcategoryName of category.subcategories) {
+            const normalizedName = normalizeRecommendationName(subcategoryName);
+            await db.runAsync(
+              `INSERT INTO subcategory_presets
+                (user_id, category_name, name, normalized_name, use_count, last_used_at, is_archived, created_at, updated_at)
+               VALUES (?, ?, ?, ?, 0, NULL, 0, ?, ?)
+               ON CONFLICT(user_id, category_name, normalized_name) DO NOTHING`,
+              [
+                user.id,
+                category.name,
+                subcategoryName,
+                normalizedName,
+                now,
+                now,
+              ],
+            );
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Failed ensuring default subcategory catalog:", error);
+    }
+  })().finally(() => {
+    ensureDefaultCatalogRequest = null;
+  });
+
+  return ensureDefaultCatalogRequest;
 };
 
 export const preloadRecommendationsForCategory = async (
@@ -278,6 +347,8 @@ export const preloadAllRecommendations = async (db: SQLiteDatabase): Promise<voi
   }
 
   bootstrapRequest = (async () => {
+    await ensureDefaultSubcategoryCatalog(db);
+
     recommendationCache.subcategories.clear();
     recommendationCache.shops.clear();
     categoryColorCache.byCategoryId.clear();

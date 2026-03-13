@@ -5,6 +5,7 @@ import { SafeArea } from "@/src/components/SafeArea";
 import { useGuardedModalPush } from "@/src/hooks/guardForModals";
 import { useAppTheme } from "@/src/providers/AppThemeProvider";
 import { clearBudgetForCategory, useBudgetStore } from "@/src/stores/budgetStore";
+import { HOME_CATEGORY_DEFAULTS, HOME_COLOR_FALLBACKS } from "@/src/constants/homeCategoryDefaults";
 import {
   Inter_400Regular,
   Inter_500Medium,
@@ -12,159 +13,20 @@ import {
   Inter_700Bold,
 } from "@expo-google-fonts/inter";
 import { useFonts } from "expo-font";
-import type { LucideIcon } from "lucide-react-native";
-import {
-  Baby,
-  Banknote,
-  BookOpen,
-  BriefcaseBusiness,
-  Bus,
-  Car,
-  CircleHelp,
-  Coffee,
-  Droplets,
-  Dumbbell,
-  Film,
-  Fuel,
-  Gamepad2,
-  Gift,
-  GraduationCap,
-  Heart,
-  House,
-  PawPrint,
-  Phone,
-  PiggyBank,
-  Plane,
-  ShieldPlus,
-  ShoppingBag,
-  ShoppingBasket,
-  ShoppingCart,
-  Smartphone,
-  Sparkles,
-  Stethoscope,
-  Tv,
-  Utensils,
-  Wrench,
-  X,
-  Zap,
-} from "lucide-react-native";
+import { X } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { categoriesForMonth, paymentSumsByCategory } from "@/src/utils/queries";
+import { DEFAULT_CATEGORY_ICON_NAME, resolveIconByName } from "@/src/utils/categoryIcons";
+import { getAppPreference, setAppPreference } from "@/src/utils/preferences";
+import {
+  categoriesForMonth,
+  paymentSumsByCategoryForMonth,
+  paymentSumsByCategoryNameForMonth,
+} from "@/src/utils/queries";
 import { drizzle, useLiveQuery } from "drizzle-orm/expo-sqlite";
 import { useSQLiteContext } from "expo-sqlite";
-
-const ICONS: Record<string, LucideIcon> = {
-  Banknote,
-  Baby,
-  BriefcaseBusiness,
-  BookOpen,
-  Bus,
-  Car,
-  Coffee,
-  Droplets,
-  Dumbbell,
-  Film,
-  Fuel,
-  Gamepad2,
-  Gift,
-  GraduationCap,
-  Heart,
-  House,
-  PawPrint,
-  Phone,
-  Plane,
-  PiggyBank,
-  ShieldPlus,
-  ShoppingBag,
-  ShoppingBasket,
-  ShoppingCart,
-  Smartphone,
-  Sparkles,
-  Stethoscope,
-  Tv,
-  Utensils,
-  Wrench,
-  Zap,
-};
-const CATEGORY_COLOR_POOL = [
-  "#00DDB7",
-  "#FFC83C",
-  "#36A8FF",
-  "#FF4752",
-  "#C48FEE",
-  "#FF9949",
-  "#5FFF94",
-  "#7D8CFF",
-  "#4FD27E",
-];
-type PredefinedCategoryOption = {
-  name: string;
-  icon: LucideIcon;
-  iconName: string;
-};
-
-const PREDEFINED_CATEGORY_OPTIONS: PredefinedCategoryOption[] = [
-  { name: "Groceries", icon: ShoppingCart, iconName: "ShoppingCart" },
-  { name: "Transport", icon: Car, iconName: "Car" },
-  { name: "Fuel", icon: Fuel, iconName: "Fuel" },
-  { name: "Utilities", icon: Zap, iconName: "Zap" },
-  { name: "Home", icon: House, iconName: "House" },
-  { name: "Health", icon: Stethoscope, iconName: "Stethoscope" },
-  { name: "Fitness", icon: Dumbbell, iconName: "Dumbbell" },
-  { name: "Restaurants", icon: Utensils, iconName: "Utensils" },
-  { name: "Coffee", icon: Coffee, iconName: "Coffee" },
-  { name: "Entertainment", icon: Film, iconName: "Film" },
-  { name: "Streaming", icon: Tv, iconName: "Tv" },
-  { name: "Gaming", icon: Gamepad2, iconName: "Gamepad2" },
-  { name: "Shopping", icon: ShoppingBag, iconName: "ShoppingBag" },
-  { name: "Clothing", icon: ShoppingBasket, iconName: "ShoppingBasket" },
-  { name: "Education", icon: GraduationCap, iconName: "GraduationCap" },
-  { name: "Books", icon: BookOpen, iconName: "BookOpen" },
-  { name: "Work", icon: BriefcaseBusiness, iconName: "BriefcaseBusiness" },
-  { name: "Travel", icon: Plane, iconName: "Plane" },
-  { name: "Phone", icon: Smartphone, iconName: "Smartphone" },
-  { name: "Bills", icon: Wrench, iconName: "Wrench" },
-  { name: "Gifts", icon: Gift, iconName: "Gift" },
-  { name: "Family", icon: Baby, iconName: "Baby" },
-  { name: "Pets", icon: PawPrint, iconName: "PawPrint" },
-  { name: "Insurance", icon: ShieldPlus, iconName: "ShieldPlus" },
-  { name: "Savings", icon: PiggyBank, iconName: "PiggyBank" },
-  { name: "Misc", icon: Sparkles, iconName: "Sparkles" },
-];
-const CATEGORY_COLOR_OPTIONS = [
-  "#00DDB7",
-  "#36A8FF",
-  "#FF4752",
-  "#FFC83C",
-  "#7D8CFF",
-  "#FF9949",
-  "#4FD27E",
-  "#C48FEE",
-  "#15B8A6",
-  "#FF7AA2",
-  "#00B3FF",
-  "#FF5AD9",
-  "#00E5FF",
-  "#A3FF12",
-  "#FF6B00",
-];
-const PREFERENCES_TABLE_SQL = `
-  CREATE TABLE IF NOT EXISTS app_preferences (
-    key TEXT PRIMARY KEY NOT NULL,
-    value TEXT NOT NULL,
-    updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-  );
-`;
-const PREFERENCES_UPSERT_SQL = `
-  INSERT INTO app_preferences (key, value, updated_at)
-  VALUES (?, ?, (unixepoch() * 1000))
-  ON CONFLICT(key) DO UPDATE SET
-    value = excluded.value,
-    updated_at = excluded.updated_at;
-`;
 const HOME_CATEGORY_ORDER_KEY_PREFIX = "home_category_order";
 const HOME_LAYOUT_STYLE_KEY = "home_layout_style_v1";
 
@@ -172,57 +34,13 @@ const normalizeToken = (value: string | null | undefined): string =>
   (value ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 const arraysEqual = (a: string[], b: string[]): boolean =>
   a.length === b.length && a.every((value, index) => value === b[index]);
+const isHexColor = (value: string | null | undefined): value is string =>
+  !!value && /^#[0-9a-fA-F]{6}$/.test(value);
 
-const resolveHomeIcon = (rawIcon: string | null | undefined, categoryName: string | null | undefined): LucideIcon => {
-  const normalizedCategory = normalizeToken(categoryName);
-  
-
-  if (normalizedCategory === "groceries") return ShoppingCart;
-  if (normalizedCategory === "transport") return Car;
-  if (normalizedCategory === "utilities") return Zap;
-  if (normalizedCategory === "health") return Heart;
-  if (normalizedCategory === "restaurants") return Utensils;
-  if (normalizedCategory === "entertainment") return Gamepad2;
-  if (normalizedCategory === "shopping") return ShoppingBag;
-  if (normalizedCategory === "education") return GraduationCap;
-  if (normalizedCategory === "savings") return PiggyBank;
-
-  if (/(groc|supermarket|market)/.test(normalizedCategory)) return ShoppingCart;
-  if (/(transport|commute|fuel|gas|ride|taxi|bus|train)/.test(normalizedCategory)) return Car;
-  if (/(utilit|bill|internet|electric|water|phone|wifi)/.test(normalizedCategory)) return Zap;
-  if (/(health|medical|doctor|pharma|fitness|wellness)/.test(normalizedCategory)) return Heart;
-  if (/(restaurant|food|dining|meal|drink|coffee)/.test(normalizedCategory)) return Utensils;
-  if (/(entertain|movie|cinema|game|stream)/.test(normalizedCategory)) return Gamepad2;
-  if (/(educat|school|course|book|study|tuition)/.test(normalizedCategory)) return GraduationCap;
-  if (/(shop|clothes|fashion|accessories)/.test(normalizedCategory)) return ShoppingBag;
-  if (/(saving|invest|retire|emergencyfund|goal)/.test(normalizedCategory)) return PiggyBank;
-
-  return ICONS[rawIcon ?? ""] ?? CircleHelp;
-};
-const resolveCategoryIconName = (categoryName: string): string => {
-  const normalizedCategory = normalizeToken(categoryName);
-
-  if (normalizedCategory === "groceries") return "ShoppingCart";
-  if (normalizedCategory === "transport") return "Bus";
-  if (normalizedCategory === "utilities") return "Zap";
-  if (normalizedCategory === "health") return "Heart";
-  if (normalizedCategory === "restaurants") return "Utensils";
-  if (normalizedCategory === "entertainment") return "Film";
-  if (normalizedCategory === "shopping") return "ShoppingBag";
-  if (normalizedCategory === "education") return "GraduationCap";
-  if (normalizedCategory === "savings") return "PiggyBank";
-
-  if (/(groc|supermarket|market)/.test(normalizedCategory)) return "ShoppingCart";
-  if (/(transport|commute|fuel|gas|ride|taxi|bus|train)/.test(normalizedCategory)) return "Bus";
-  if (/(utilit|bill|internet|electric|water|phone|wifi)/.test(normalizedCategory)) return "Zap";
-  if (/(health|medical|doctor|pharma|fitness|wellness)/.test(normalizedCategory)) return "Heart";
-  if (/(restaurant|food|dining|meal|drink|coffee)/.test(normalizedCategory)) return "Utensils";
-  if (/(entertain|movie|cinema|game|stream)/.test(normalizedCategory)) return "Film";
-  if (/(educat|school|course|book|study|tuition)/.test(normalizedCategory)) return "BookOpen";
-  if (/(shop|clothes|fashion|accessories)/.test(normalizedCategory)) return "ShoppingBag";
-  if (/(saving|invest|retire|emergencyfund|goal)/.test(normalizedCategory)) return "PiggyBank";
-
-  return "CircleHelp";
+type CategoryPresetOption = {
+  name: string;
+  iconName: string;
+  color: string;
 };
 
 const withAlpha = (hex: string, alpha: number): string => {
@@ -244,13 +62,14 @@ function HomeContent() {
   const insets = useSafeAreaInsets();
 
   const dbExpo = useSQLiteContext();
-  const db = drizzle(dbExpo);
+  const db = useMemo(() => drizzle(dbExpo), [dbExpo]);
   const { budgetOverrides } = useBudgetStore();
   const [isAddCategoryVisible, setAddCategoryVisible] = useState(false);
   const [isCreatingCategory, setIsCreatingCategory] = useState(false);
   const [selectedCategoryPreset, setSelectedCategoryPreset] = useState<string | null>(null);
-  const [selectedCategoryColor, setSelectedCategoryColor] = useState(CATEGORY_COLOR_OPTIONS[0]);
+  const [selectedCategoryColor, setSelectedCategoryColor] = useState(HOME_COLOR_FALLBACKS[0]);
   const [categoryOrderIds, setCategoryOrderIds] = useState<string[] | null>(null);
+  const [isCategoryOrderHydrated, setIsCategoryOrderHydrated] = useState(false);
   const [homeLayoutStyle, setHomeLayoutStyle] = useState<HomeLayoutStyle>("grid");
   const [isCategoryEditing, setIsCategoryEditing] = useState(false);
   const latestAvailableMonth = useMemo(
@@ -262,22 +81,22 @@ function HomeContent() {
     () => new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1),
     [currentMonth],
   );
-  const currentMonthTitle = useMemo(() => {
+  const currentMonthTitle = (() => {
     const monthLabel = currentMonth.toLocaleString("en-US", { month: "long" });
     const isCurrentYear = currentMonth.getFullYear() === new Date().getFullYear();
     return isCurrentYear
       ? `Your ${monthLabel} Spending.`
       : `Your ${monthLabel} ${currentMonth.getFullYear()} Spending.`;
-  }, [currentMonth]);
-  const handlePreviousMonth = useCallback(() => {
+  })();
+  const handlePreviousMonth = () => {
     setCurrentMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
-  }, []);
-  const handleNextMonth = useCallback(() => {
+  };
+  const handleNextMonth = () => {
     setCurrentMonth((prev) => {
       const next = new Date(prev.getFullYear(), prev.getMonth() + 1, 1);
       return next.getTime() > latestAvailableMonth.getTime() ? prev : next;
     });
-  }, [latestAvailableMonth]);
+  };
   const categoryOrderKey = useMemo(
     () => `${HOME_CATEGORY_ORDER_KEY_PREFIX}_${currentMonth.getTime()}`,
     [currentMonth],
@@ -287,18 +106,18 @@ function HomeContent() {
     () => categoriesForMonth(db, currentMonth),
     [db, currentMonth],
   );
-  const previousMonthCategoriesQuery = useMemo(
-    () => categoriesForMonth(db, previousMonth),
-    [db, previousMonth],
+  const currentMonthPaymentSumsQuery = useMemo(
+    () => paymentSumsByCategoryForMonth(db, currentMonth),
+    [currentMonth, db],
   );
-  const paymentsQuery = useMemo(
-    () => paymentSumsByCategory(db),
-    [db],
+  const previousMonthPaymentSumsByNameQuery = useMemo(
+    () => paymentSumsByCategoryNameForMonth(db, previousMonth),
+    [db, previousMonth],
   );
 
   const { data: categoriesData } = useLiveQuery(categoriesQuery);
-  const { data: previousMonthCategoriesData } = useLiveQuery(previousMonthCategoriesQuery);
-  const { data: paymentSumsData } = useLiveQuery(paymentsQuery);
+  const { data: paymentSumsData } = useLiveQuery(currentMonthPaymentSumsQuery);
+  const { data: previousMonthPaymentSumsByNameData } = useLiveQuery(previousMonthPaymentSumsByNameQuery);
   const paymentSumsByCategoryId = useMemo(
     () => new Map(paymentSumsData.map((row) => [row.categoryId, Number(row.totalSumCents)])),
     [paymentSumsData],
@@ -306,21 +125,21 @@ function HomeContent() {
   const previousMonthSpendingByCategoryToken = useMemo(() => {
     const spendingByToken = new Map<string, number>();
 
-    previousMonthCategoriesData.forEach((item) => {
+    previousMonthPaymentSumsByNameData.forEach((item) => {
       const token = normalizeToken(item.categoryName);
       if (!token) return;
 
-      const spendCents = paymentSumsByCategoryId.get(item.id) ?? 0;
+      const spendCents = Number(item.totalSumCents);
       spendingByToken.set(token, (spendingByToken.get(token) ?? 0) + spendCents);
     });
 
     return spendingByToken;
-  }, [paymentSumsByCategoryId, previousMonthCategoriesData]);
+  }, [previousMonthPaymentSumsByNameData]);
   const expenseItems = useMemo<ExpenseItem[]>(
     () =>
       categoriesData.map((item) => {
         const circleColor = item.color;
-        const icon = resolveHomeIcon(item.icon, item.categoryName);
+        const icon = resolveIconByName(item.icon);
         const categoryTotalCents = paymentSumsByCategoryId.get(item.id) ?? 0;
         const categoryTotal = Number((categoryTotalCents / 100).toFixed(2));
         const categoryTotalNoDecimals = Math.round(categoryTotalCents / 100);
@@ -351,11 +170,11 @@ function HomeContent() {
   const persistCategoryOrder = useCallback(
     async (nextOrderIds: string[]) => {
       try {
-        await dbExpo.runAsync(PREFERENCES_TABLE_SQL);
-        await dbExpo.runAsync(PREFERENCES_UPSERT_SQL, [
+        await setAppPreference(
+          dbExpo,
           categoryOrderKey,
           JSON.stringify(nextOrderIds),
-        ]);
+        );
       } catch (error) {
         console.error("Failed to persist category order", error);
       }
@@ -365,28 +184,27 @@ function HomeContent() {
 
   useEffect(() => {
     let isMounted = true;
+    setIsCategoryOrderHydrated(false);
 
     const loadPersistedCategoryOrder = async () => {
       try {
-        await dbExpo.runAsync(PREFERENCES_TABLE_SQL);
-        const row = await dbExpo.getFirstAsync<{ value: string }>(
-          "SELECT value FROM app_preferences WHERE key = ? LIMIT 1",
-          [categoryOrderKey],
-        );
+        const value = await getAppPreference(dbExpo, categoryOrderKey, "");
         if (!isMounted) return;
 
-        if (!row?.value) {
+        if (!value) {
           setCategoryOrderIds([]);
+          setIsCategoryOrderHydrated(true);
           return;
         }
 
         try {
-          const parsed = JSON.parse(row.value);
+          const parsed = JSON.parse(value);
           if (Array.isArray(parsed)) {
             const normalized = parsed
               .map((value) => String(value))
               .filter((value) => value.length > 0);
             setCategoryOrderIds(normalized);
+            setIsCategoryOrderHydrated(true);
             return;
           }
         } catch {
@@ -394,10 +212,12 @@ function HomeContent() {
         }
 
         setCategoryOrderIds([]);
+        setIsCategoryOrderHydrated(true);
       } catch (error) {
         console.error("Failed to load category order", error);
         if (isMounted) {
           setCategoryOrderIds([]);
+          setIsCategoryOrderHydrated(true);
         }
       }
     };
@@ -413,15 +233,11 @@ function HomeContent() {
 
     const loadHomeLayoutStyle = async () => {
       try {
-        await dbExpo.runAsync(PREFERENCES_TABLE_SQL);
-        const row = await dbExpo.getFirstAsync<{ value: string }>(
-          "SELECT value FROM app_preferences WHERE key = ? LIMIT 1",
-          [HOME_LAYOUT_STYLE_KEY],
-        );
+        const value = await getAppPreference(dbExpo, HOME_LAYOUT_STYLE_KEY, "grid");
 
         if (!isMounted) return;
-        if (row?.value === "grid" || row?.value === "masonry") {
-          setHomeLayoutStyle(row.value);
+        if (value === "grid" || value === "masonry") {
+          setHomeLayoutStyle(value);
           return;
         }
         setHomeLayoutStyle("grid");
@@ -478,50 +294,79 @@ function HomeContent() {
     ],
     [orderedExpenseItems],
   );
-  const totalExpenseNoDecimals = useMemo(
-    () => Math.round(expenseItems.reduce((acc, item) => acc + Number(item.amount), 0)),
-    [expenseItems],
-  );
+  const totalExpenseNoDecimals = Math.round(expenseItems.reduce((acc, item) => acc + Number(item.amount), 0));
   const existingCategoryTokens = useMemo(
     () => new Set(categoriesData.map((item) => normalizeToken(item.categoryName))),
     [categoriesData],
   );
-  const availablePresetCount = useMemo(
-    () => PREDEFINED_CATEGORY_OPTIONS.filter((option) => !existingCategoryTokens.has(normalizeToken(option.name))).length,
-    [existingCategoryTokens],
-  );
-  const selectedPresetOption = useMemo(
-    () => PREDEFINED_CATEGORY_OPTIONS.find((option) => option.name === selectedCategoryPreset) ?? null,
-    [selectedCategoryPreset],
-  );
-  const SelectedPresetIcon = selectedCategoryPreset
-    ? selectedPresetOption?.icon ?? resolveHomeIcon(undefined, selectedCategoryPreset)
-    : CircleHelp;
+  const categoryPresetOptions = useMemo<CategoryPresetOption[]>(() => {
+    const deduped = new Map<string, CategoryPresetOption>();
 
-  const openAddCategoryModal = useCallback(() => {
-    const defaultColor = CATEGORY_COLOR_OPTIONS[categoriesData.length % CATEGORY_COLOR_OPTIONS.length];
+    categoriesData.forEach((row) => {
+      const token = normalizeToken(row.categoryName);
+      if (!token || deduped.has(token)) return;
+      deduped.set(token, {
+        name: row.categoryName,
+        iconName: row.icon ?? DEFAULT_CATEGORY_ICON_NAME,
+        color: isHexColor(row.color) ? row.color : HOME_COLOR_FALLBACKS[0],
+      });
+    });
+
+    HOME_CATEGORY_DEFAULTS.forEach((row) => {
+      const token = normalizeToken(row.name);
+      if (!token || deduped.has(token)) return;
+      deduped.set(token, row);
+    });
+
+    return Array.from(deduped.values());
+  }, [categoriesData]);
+  const categoryColorOptions = useMemo(() => {
+    const colors = new Set<string>();
+
+    categoriesData.forEach((row) => {
+      if (isHexColor(row.color)) {
+        colors.add(row.color);
+      }
+    });
+
+    HOME_COLOR_FALLBACKS.forEach((color) => colors.add(color));
+    return Array.from(colors);
+  }, [categoriesData]);
+  const availablePresetCount = categoryPresetOptions
+    .filter((option) => !existingCategoryTokens.has(normalizeToken(option.name)))
+    .length;
+  const selectedPresetOption =
+    categoryPresetOptions.find((option) => option.name === selectedCategoryPreset) ?? null;
+  const SelectedPresetIcon = resolveIconByName(selectedPresetOption?.iconName);
+
+  const openAddCategoryModal = () => {
+    const defaultColor = categoryColorOptions[categoriesData.length % categoryColorOptions.length] ?? HOME_COLOR_FALLBACKS[0];
     const firstAvailablePreset =
-      PREDEFINED_CATEGORY_OPTIONS.find((option) => !existingCategoryTokens.has(normalizeToken(option.name)))?.name ?? null;
+      categoryPresetOptions.find((option) => !existingCategoryTokens.has(normalizeToken(option.name)))?.name ?? null;
     setIsCategoryEditing(false);
     setSelectedCategoryPreset(firstAvailablePreset);
     setSelectedCategoryColor(defaultColor);
     setAddCategoryVisible(true);
-  }, [categoriesData.length, existingCategoryTokens]);
-  const closeAddCategoryModal = useCallback(() => {
+  };
+  const closeAddCategoryModal = () => {
     setAddCategoryVisible(false);
     setIsCreatingCategory(false);
-  }, []);
-  const handleSelectPresetCategory = useCallback((presetName: string) => {
+  };
+  const handleSelectPresetCategory = (presetName: string) => {
     setSelectedCategoryPreset(presetName);
-  }, []);
-  const handleCategoryOrderCommit = useCallback(
-    (nextCategoryIds: string[]) => {
-      setCategoryOrderIds(nextCategoryIds);
-      void persistCategoryOrder(nextCategoryIds);
-    },
-    [persistCategoryOrder],
-  );
-  const handleCreateCategory = useCallback(async () => {
+    const presetColor = categoryPresetOptions.find((option) => option.name === presetName)?.color;
+    if (presetColor) {
+      setSelectedCategoryColor(presetColor);
+    }
+  };
+  const handleCategoryOrderCommit = (nextCategoryIds: string[]) => {
+    setCategoryOrderIds(nextCategoryIds);
+    void persistCategoryOrder(nextCategoryIds);
+  };
+  const handleCategoryOrderStart = () => {
+    setIsCategoryEditing(true);
+  };
+  const handleCreateCategory = async () => {
     if (!selectedCategoryPreset) {
       Alert.alert("Pick a category", "Select one option from the list.");
       return;
@@ -533,8 +378,8 @@ function HomeContent() {
       Alert.alert("Already exists", "This category already exists for this month.");
       return;
     }
-    const color = selectedCategoryColor || CATEGORY_COLOR_POOL[categoriesData.length % CATEGORY_COLOR_POOL.length];
-    const iconName = selectedPresetOption?.iconName ?? resolveCategoryIconName(trimmedName);
+    const color = selectedCategoryColor || HOME_COLOR_FALLBACKS[categoriesData.length % HOME_COLOR_FALLBACKS.length];
+    const iconName = selectedPresetOption?.iconName ?? DEFAULT_CATEGORY_ICON_NAME;
     const userId = categoriesData[0]?.userId ?? 1;
 
     try {
@@ -549,87 +394,80 @@ function HomeContent() {
       Alert.alert("Unable to add category", "Please try again.");
       setIsCreatingCategory(false);
     }
-  }, [categoriesData, closeAddCategoryModal, currentMonth, dbExpo, existingCategoryTokens, selectedCategoryColor, selectedCategoryPreset, selectedPresetOption]);
-  const handleOpenAddExpense = useCallback(
-    (item: ExpenseItem) => {
-      if (isCategoryEditing) {
-        setIsCategoryEditing(false);
-        return;
-      }
+  };
+  const handleOpenAddExpense = (item: ExpenseItem) => {
+    if (isCategoryEditing) {
+      setIsCategoryEditing(false);
+      return;
+    }
 
-      if (item.kind === "add") {
-        openAddCategoryModal();
-        return;
-      }
-      pushModal({
-        pathname: "/(modals)/addExpense",
-        params: {
-          category: item.name,
-          categoryId: item.id,
-          categoryUserId: String(item.userId ?? 1),
-        },
-      });
-    },
-    [isCategoryEditing, openAddCategoryModal, pushModal],
-  );
-  const handleLongPressCategory = useCallback((item: ExpenseItem) => {
+    if (item.kind === "add") {
+      openAddCategoryModal();
+      return;
+    }
+    pushModal({
+      pathname: "/(modals)/addExpense",
+      params: {
+        category: item.name,
+        categoryId: item.id,
+        categoryUserId: String(item.userId ?? 1),
+      },
+    });
+  };
+  const handleLongPressCategory = (item: ExpenseItem) => {
     if (item.kind !== "category") {
       return;
     }
     setIsCategoryEditing(true);
-  }, []);
-  const handleDeleteCategory = useCallback(
-    (item: ExpenseItem) => {
-      if (item.kind !== "category") {
-        return;
-      }
+  };
+  const handleDeleteCategory = (item: ExpenseItem) => {
+    if (item.kind !== "category") {
+      return;
+    }
 
-      const categoryId = Number(item.id);
-      if (!Number.isFinite(categoryId)) {
-        return;
-      }
+    const categoryId = Number(item.id);
+    if (!Number.isFinite(categoryId)) {
+      return;
+    }
 
-      Alert.alert(
-        "Remove category?",
-        `"${item.name}" and all related expenses will be deleted.`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Delete",
-            style: "destructive",
-            onPress: async () => {
-              try {
-                await dbExpo.runAsync(
-                  "DELETE FROM products WHERE payment_id IN (SELECT id FROM payments WHERE category_id = ?)",
-                  [categoryId],
-                );
-                await dbExpo.runAsync("DELETE FROM payments WHERE category_id = ?", [categoryId]);
-                await dbExpo.runAsync("DELETE FROM categories WHERE id = ?", [categoryId]);
-                clearBudgetForCategory(String(categoryId));
-                setCategoryOrderIds((prev) => {
-                  if (!prev) return prev;
-                  const next = prev.filter((id) => id !== item.id);
-                  void persistCategoryOrder(next);
-                  return next;
-                });
-                setIsCategoryEditing(false);
-              } catch (error) {
-                console.error("Failed deleting category", error);
-                Alert.alert("Unable to delete", "Please try again.");
-              }
-            },
+    Alert.alert(
+      "Remove category?",
+      `"${item.name}" and all related expenses will be deleted.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await dbExpo.runAsync(
+                "DELETE FROM products WHERE payment_id IN (SELECT id FROM payments WHERE category_id = ?)",
+                [categoryId],
+              );
+              await dbExpo.runAsync("DELETE FROM payments WHERE category_id = ?", [categoryId]);
+              await dbExpo.runAsync("DELETE FROM categories WHERE id = ?", [categoryId]);
+              clearBudgetForCategory(String(categoryId));
+              setCategoryOrderIds((prev) => {
+                if (!prev) return prev;
+                const next = prev.filter((id) => id !== item.id);
+                void persistCategoryOrder(next);
+                return next;
+              });
+            } catch (error) {
+              console.error("Failed deleting category", error);
+              Alert.alert("Unable to delete", "Please try again.");
+            }
           },
-        ],
-      );
-    },
-    [dbExpo, persistCategoryOrder],
-  );
-  const handleDismissEditing = useCallback(() => {
+        },
+      ],
+    );
+  };
+  const handleDismissEditing = () => {
     if (!isCategoryEditing) {
       return;
     }
     setIsCategoryEditing(false);
-  }, [isCategoryEditing]);
+  };
 
   
   return (
@@ -648,15 +486,23 @@ function HomeContent() {
           <Text style={styles.expenseTotal}>
             Expense ${totalExpenseNoDecimals}
           </Text>
-          <ExpenseGrid
-            items={gridItems}
-            layoutStyle={homeLayoutStyle}
-            onPressItem={handleOpenAddExpense}
-            onLongPressItem={handleLongPressCategory}
-            onDeleteItem={handleDeleteCategory}
-            isEditing={isCategoryEditing}
-            onReorderCommit={handleCategoryOrderCommit}
-          />
+          {isCategoryOrderHydrated ? (
+            <ExpenseGrid
+              items={gridItems}
+              layoutStyle={homeLayoutStyle}
+              onPressItem={handleOpenAddExpense}
+              onLongPressItem={handleLongPressCategory}
+              onDeleteItem={handleDeleteCategory}
+              isEditing={isCategoryEditing}
+              onReorderStart={handleCategoryOrderStart}
+              onReorderCommit={handleCategoryOrderCommit}
+              onBackgroundPress={handleDismissEditing}
+            />
+          ) : (
+            <View style={styles.gridLoading}>
+              <ActivityIndicator size="small" color={isDark ? "#F3F4F6" : "#111827"} />
+            </View>
+          )}
         </View>
       </View>
       <Modal visible={isAddCategoryVisible} transparent animationType="fade" onRequestClose={closeAddCategoryModal}>
@@ -690,10 +536,10 @@ function HomeContent() {
             >
               <Text style={[styles.modalSectionLabel, isDark ? styles.modalSectionLabelDark : null]}>Pick a category</Text>
               <View style={styles.presetGrid}>
-                {PREDEFINED_CATEGORY_OPTIONS.map((option) => {
+                {categoryPresetOptions.map((option) => {
                   const isSelected = selectedCategoryPreset === option.name;
                   const isTaken = existingCategoryTokens.has(normalizeToken(option.name));
-                  const IconComponent = option.icon;
+                  const IconComponent = resolveIconByName(option.iconName);
                   return (
                     <Pressable
                       key={option.name}
@@ -740,7 +586,7 @@ function HomeContent() {
 
               <Text style={[styles.modalSectionLabel, isDark ? styles.modalSectionLabelDark : null]}>Pick a color</Text>
               <View style={styles.colorPalette}>
-                {CATEGORY_COLOR_OPTIONS.map((color) => {
+                {categoryColorOptions.map((color) => {
                   const isSelected = selectedCategoryColor === color;
                   return (
                     <Pressable
@@ -856,6 +702,12 @@ const styles = StyleSheet.create({
   },
   contentForeground: {
     flex: 1,
+  },
+  gridLoading: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingTop: 16,
   },
   categoryModalOverlay: {
     flex: 1,

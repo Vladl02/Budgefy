@@ -11,7 +11,7 @@ import MonthlySummaryCard from "@/src/components/overview/donutCard";
 import EditBudgetModal, { SummaryItem } from "@/src/components/overview/EditBudgetModal";
 import { resolveCategoryIconKey, type IconKey } from "@/src/components/overview/category";
 import { useAppTheme } from "@/src/providers/AppThemeProvider";
-import { categoriesForMonth, paymentSumsByCategory } from "@/src/utils/queries";
+import { categoriesForMonth, paymentSumsByCategoryForMonth } from "@/src/utils/queries";
 import { useBudgetStore } from "@/src/stores/budgetStore";
 
 export default function BudgetSheet() {
@@ -19,7 +19,7 @@ export default function BudgetSheet() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const dbExpo = useSQLiteContext();
-  const db = drizzle(dbExpo);
+  const db = useMemo(() => drizzle(dbExpo), [dbExpo]);
 
   const { budgetOverrides, setAllBudgets } = useBudgetStore();
   const [isEditModalVisible, setEditModalVisible] = useState(false);
@@ -33,8 +33,8 @@ export default function BudgetSheet() {
     [db, currentMonth],
   );
   const paymentsQuery = useMemo(
-    () => paymentSumsByCategory(db),
-    [db],
+    () => paymentSumsByCategoryForMonth(db, currentMonth),
+    [currentMonth, db],
   );
   const { data: categoriesData } = useLiveQuery(categoriesQuery);
   const { data: paymentSumsData } = useLiveQuery(paymentsQuery);

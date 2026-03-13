@@ -2,7 +2,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import type { LucideIcon } from "lucide-react-native";
 import { Plus, X } from "lucide-react-native";
 import React from "react";
-import { Platform, Pressable, StyleSheet, Text, type GestureResponderEvent, View } from "react-native";
+import { Animated, Easing, Platform, Pressable, StyleSheet, Text, type GestureResponderEvent, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import { useAppTheme } from "@/src/providers/AppThemeProvider";
 
@@ -41,6 +41,8 @@ type ExpenseBoxProps = {
   onPress?: () => void;
   onLongPress?: () => void;
   onDelete?: () => void;
+  interactionMode?: "native" | "passive";
+  isPressedVisual?: boolean;
 };
 
 function ExpenseBox({
@@ -59,6 +61,8 @@ function ExpenseBox({
   onPress,
   onLongPress,
   onDelete,
+  interactionMode = "native",
+  isPressedVisual = false,
 }: ExpenseBoxProps) {
   const { isDark } = useAppTheme();
   const isAndroid = Platform.OS === "android";
@@ -107,9 +111,30 @@ function ExpenseBox({
 
   const handleLongPress = (event: GestureResponderEvent) => {
     event.stopPropagation();
+    if (!onLongPress) {
+      return;
+    }
     didLongPress.current = true;
     onLongPress?.();
   };
+  const deleteVisibility = React.useRef(new Animated.Value(isEditing ? 1 : 0)).current;
+  const deleteScale = React.useMemo(
+    () =>
+      deleteVisibility.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0.7, 1],
+      }),
+    [deleteVisibility],
+  );
+
+  React.useEffect(() => {
+    Animated.timing(deleteVisibility, {
+      toValue: isEditing ? 1 : 0,
+      duration: isEditing ? 70 : 100,
+      easing: isEditing ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [deleteVisibility, isEditing]);
 
   const renderGlassLayers = () => (
     <>
@@ -142,7 +167,61 @@ function ExpenseBox({
     );
   };
 
+  const renderDeleteButton = () => (
+    <Animated.View
+      pointerEvents={isEditing ? "auto" : "none"}
+      style={[
+        styles.deleteButtonWrap,
+        {
+          opacity: deleteVisibility,
+          transform: [{ scale: deleteScale }],
+        },
+      ]}
+    >
+      <Pressable
+        style={styles.deleteButton}
+        hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+        pressRetentionOffset={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        disabled={!isEditing}
+        onPress={(event) => {
+          event.stopPropagation();
+          onDelete?.();
+        }}
+      >
+        <X size={13} color="#FFFFFF" strokeWidth={3} />
+      </Pressable>
+    </Animated.View>
+  );
+
+  const isPassive = interactionMode === "passive";
+
   if (isAddCard) {
+    if (isPassive) {
+      return (
+        <View
+          style={[
+            styles.shell,
+            { width: cardWidth, height: cardHeight },
+            styles.cardBase,
+            isDark ? styles.cardBaseDark : styles.cardBaseLight,
+            isPressedVisual ? styles.cardPressed : null,
+          ]}
+        >
+          <View style={[styles.surface, cardSurfaceColor ? { backgroundColor: cardSurfaceColor } : null]}>
+            {renderGlassLayers()}
+            <View style={[styles.content, styles.addCard]}>
+              <View style={[styles.addPlusCircle, isDark ? styles.addPlusCircleDark : null]}>
+                <Plus size={20} color={isDark ? "#E5E7EB" : "#1F2937"} />
+              </View>
+              <Text style={[styles.addTitle, isDark ? styles.addTitleDark : null]} numberOfLines={2}>
+                {name}
+              </Text>
+            </View>
+          </View>
+        </View>
+      );
+    }
+
     return (
       <Pressable
         onPress={(event) => {
@@ -173,8 +252,65 @@ function ExpenseBox({
   }
 
   if (isEditing) {
+    if (isPassive) {
+      return (
+        <View
+          style={[
+            styles.shell,
+            { width: cardWidth, height: cardHeight },
+            styles.cardBase,
+            isDark ? styles.cardBaseDark : styles.cardBaseLight,
+            isPressedVisual ? styles.cardPressed : null,
+          ]}
+        >
+          <View style={[styles.surface, cardSurfaceColor ? { backgroundColor: cardSurfaceColor } : null]}>
+            {renderGlassLayers()}
+            <View style={styles.content}>
+              <Text style={[styles.name, isDark ? styles.textDark : null]} numberOfLines={2}>
+                {name}
+              </Text>
+              <View style={styles.iconRingWrap}>
+                {hasBudgetProgress ? (
+                  <Svg width={ringSize} height={ringSize} style={styles.progressRing}>
+                    <Circle
+                      cx={ringSize / 2}
+                      cy={ringSize / 2}
+                      r={ringRadius}
+                      stroke={ringColor}
+                      strokeOpacity={trackOpacity}
+                      strokeWidth={ringStrokeWidth}
+                      fill="none"
+                    />
+                    <Circle
+                      cx={ringSize / 2}
+                      cy={ringSize / 2}
+                      r={ringRadius}
+                      stroke={ringColor}
+                      strokeOpacity={progressOpacity}
+                      strokeWidth={ringStrokeWidth}
+                      strokeLinecap="round"
+                      strokeDasharray={`${ringCircumference} ${ringCircumference}`}
+                      strokeDashoffset={progressDashOffset}
+                      fill="none"
+                      transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
+                    />
+                  </Svg>
+                ) : null}
+                <View style={[styles.iconCircle, { backgroundColor: iconBadgeColor }]}>{renderIcon()}</View>
+              </View>
+              <Text style={[styles.amount, isDark ? styles.textDark : null]} numberOfLines={1}>
+                ${amount ?? 0}
+              </Text>
+            </View>
+          </View>
+          {renderDeleteButton()}
+        </View>
+      );
+    }
+
     return (
-      <View
+      <Pressable
+        onPress={handlePress}
         style={[
           styles.shell,
           { width: cardWidth, height: cardHeight },
@@ -222,16 +358,70 @@ function ExpenseBox({
             </Text>
           </View>
         </View>
-        <Pressable
-          style={styles.deleteButton}
-          hitSlop={10}
-          onPress={(event) => {
-            event.stopPropagation();
-            onDelete?.();
-          }}
-        >
-          <X size={11} color="#FFFFFF" strokeWidth={3} />
-        </Pressable>
+        {renderDeleteButton()}
+      </Pressable>
+    );
+  }
+
+  if (isPassive) {
+    return (
+      <View
+        style={[
+          styles.shell,
+          { width: cardWidth, height: cardHeight },
+          styles.cardBase,
+          isDark ? styles.cardBaseDark : styles.cardBaseLight,
+          isPressedVisual ? styles.cardPressed : null,
+        ]}
+      >
+        <View style={[styles.surface, cardSurfaceColor ? { backgroundColor: cardSurfaceColor } : null]}>
+          {renderGlassLayers()}
+          <View style={styles.content}>
+            <Text style={[styles.name, isDark ? styles.textDark : null]} numberOfLines={2}>
+              {name}
+            </Text>
+            <View style={styles.iconRingWrap}>
+              {hasBudgetProgress ? (
+                <Svg width={ringSize} height={ringSize} style={styles.progressRing}>
+                  <Circle
+                    cx={ringSize / 2}
+                    cy={ringSize / 2}
+                    r={ringRadius}
+                    stroke={ringColor}
+                    strokeOpacity={trackOpacity}
+                    strokeWidth={ringStrokeWidth}
+                    fill="none"
+                  />
+                  <Circle
+                    cx={ringSize / 2}
+                    cy={ringSize / 2}
+                    r={ringRadius}
+                    stroke={ringColor}
+                    strokeOpacity={progressOpacity}
+                    strokeWidth={ringStrokeWidth}
+                    strokeLinecap="round"
+                    strokeDasharray={`${ringCircumference} ${ringCircumference}`}
+                    strokeDashoffset={progressDashOffset}
+                    fill="none"
+                    transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
+                  />
+                </Svg>
+              ) : null}
+              <View style={[styles.iconCircle, { backgroundColor: iconBadgeColor }]}>{renderIcon()}</View>
+            </View>
+            <Text style={[styles.amount, isDark ? styles.textDark : null]} numberOfLines={1}>
+              ${amount ?? 0}
+            </Text>
+          </View>
+        </View>
+        {hasTrend ? (
+          <View style={[styles.trendBadge, { backgroundColor: trendBgColor }]}>
+            <Text style={[styles.trendBadgeText, { color: trendColor }]}>
+              {trendArrow} {absTrendPercent}%
+            </Text>
+          </View>
+        ) : null}
+        {renderDeleteButton()}
       </View>
     );
   }
@@ -239,8 +429,8 @@ function ExpenseBox({
   return (
     <Pressable
       onPress={handlePress}
-      onLongPress={handleLongPress}
-      delayLongPress={220}
+      onLongPress={onLongPress ? handleLongPress : undefined}
+      delayLongPress={200}
       style={({ pressed }) => [
         styles.shell,
         { width: cardWidth, height: cardHeight },
@@ -296,6 +486,7 @@ function ExpenseBox({
           </Text>
         </View>
       ) : null}
+      {renderDeleteButton()}
     </Pressable>
   );
 }
@@ -355,16 +546,19 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
   },
   cardPressed: {
-    transform: [{ scale: 0.98 }],
+    transform: [{ scale: 0.992 }],
+    opacity: 0.985,
+  },
+  deleteButtonWrap: {
+    position: "absolute",
+    top: -8,
+    right: -8,
+    zIndex: 10,
   },
   deleteButton: {
-    position: "absolute",
-    top: -6,
-    right: -6,
-    zIndex: 10,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: "#111827",
     alignItems: "center",
     justifyContent: "center",

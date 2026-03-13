@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react-native";
 import React from "react";
-import { Animated, FlatList, StyleSheet, View } from "react-native";
+import { Animated, FlatList, Platform, Pressable, StyleSheet } from "react-native";
 import type { SortableGridRenderItem } from "react-native-sortables";
 import Sortable from "react-native-sortables";
 import ExpenseBox from "./ExpenseBox";
@@ -31,7 +31,73 @@ type ExpenseGridProps = {
   shakeAnim?: Animated.AnimatedInterpolation<string>;
   onReorderPreview?: (nextCategoryIds: string[]) => void;
   onReorderCommit?: (nextCategoryIds: string[]) => void;
+  onReorderStart?: () => void;
+  onReorderSettled?: () => void;
+  onBackgroundPress?: () => void;
 };
+
+type SortableItemCardProps = {
+  item: ExpenseItem;
+  isCategory: boolean;
+  isEditing: boolean;
+  shouldWiggleItem: boolean;
+  wiggleRotate: Animated.AnimatedInterpolation<string>;
+  onPressItem?: (item: ExpenseItem) => void;
+  onLongPressItem?: (item: ExpenseItem) => void;
+  onDeleteItem?: (item: ExpenseItem) => void;
+};
+
+const SortableItemCard = React.memo(function SortableItemCard({
+  item,
+  isCategory,
+  isEditing,
+  shouldWiggleItem,
+  wiggleRotate,
+  onPressItem,
+  onLongPressItem,
+  onDeleteItem,
+}: SortableItemCardProps) {
+  const [isPressedVisual, setIsPressedVisual] = React.useState(false);
+  const transform = shouldWiggleItem ? [{ rotate: wiggleRotate } as const] : undefined;
+
+  return (
+    <Sortable.Touchable
+      onTap={() => {
+        setIsPressedVisual(false);
+        onPressItem?.(item);
+      }}
+      onLongPress={
+        isCategory && !isEditing
+          ? () => onLongPressItem?.(item)
+          : undefined
+      }
+      onTouchesDown={() => setIsPressedVisual(true)}
+      onTouchesUp={() => setIsPressedVisual(false)}
+      failDistance={8}
+      gestureMode="simultaneous"
+    >
+      <Animated.View style={transform ? { transform } : undefined}>
+        <ExpenseBox
+          amount={item.amount}
+          backgroundColor={item.backgroundColor}
+          circleColor={item.circleColor}
+          icon={item.icon}
+          name={item.name}
+          iconColor={item.iconColor}
+          budgetUsageRatio={item.budgetUsageRatio}
+          trendPercent={item.trendPercent}
+          isAddCard={item.kind === "add"}
+          isEditing={isCategory && isEditing}
+          cardWidth={ITEM_WIDTH}
+          cardHeight={ITEM_HEIGHT}
+          interactionMode="passive"
+          isPressedVisual={!isEditing && isPressedVisual}
+          onDelete={() => onDeleteItem?.(item)}
+        />
+      </Animated.View>
+    </Sortable.Touchable>
+  );
+});
 
 const GRID_COLUMNS = 3;
 const ITEM_WIDTH = 106;
@@ -59,9 +125,13 @@ export function ExpenseGrid({
   isEditing = false,
   shakeAnim,
   onReorderCommit,
+  onReorderStart,
+  onReorderSettled,
+  onBackgroundPress,
 }: ExpenseGridProps) {
   const effectiveLayout: HomeLayoutStyle = isEditing ? "grid" : layoutStyle;
   const isMasonryLayout = effectiveLayout === "masonry";
+  const shouldWiggle = Platform.OS === "ios";
   const activeColumns = isMasonryLayout ? MASONRY_COLUMNS : GRID_COLUMNS;
   const wiggleValue = React.useRef(new Animated.Value(0)).current;
   const wiggleLoopRef = React.useRef<Animated.CompositeAnimation | null>(null);
@@ -81,8 +151,7 @@ export function ExpenseGrid({
     [items],
   );
 
-  const canReorder =
-    isEditing &&
+  const canUseSortable =
     !isMasonryLayout &&
     categoryItems.length > 1 &&
     Boolean(onReorderCommit);
@@ -97,6 +166,7 @@ export function ExpenseGrid({
   }, [wiggleValue]);
 
   const startWiggle = React.useCallback(() => {
+    if (!shouldWiggle) return;
     if (wiggleLoopRef.current) return;
     setIsDragActive(true);
     const loop = Animated.loop(
@@ -115,11 +185,13 @@ export function ExpenseGrid({
     );
     wiggleLoopRef.current = loop;
     loop.start();
-  }, [wiggleValue]);
+  }, [shouldWiggle, wiggleValue]);
 
   const handleDragEnd = React.useCallback(
     ({ data }: { data: ExpenseItem[] }) => {
-      const nextIds = data.map((item) => item.id);
+      const nextIds = data
+        .filter((item) => item.kind === "category")
+        .map((item) => item.id);
       onReorderCommit?.(nextIds);
       stopWiggle();
     },
@@ -128,14 +200,19 @@ export function ExpenseGrid({
 
   const handleDragStart = React.useCallback((params: { key: string }) => {
     setActiveDragId(params.key);
+    onReorderStart?.();
     startWiggle();
-  }, [startWiggle]);
+  }, [onReorderStart, startWiggle]);
+
+  const handleActiveItemDropped = React.useCallback(() => {
+    onReorderSettled?.();
+  }, [onReorderSettled]);
 
   React.useEffect(() => {
-    if (!canReorder) {
+    if (!canUseSortable) {
       stopWiggle();
     }
-  }, [canReorder, stopWiggle]);
+  }, [canUseSortable, stopWiggle]);
 
   React.useEffect(
     () => () => {
@@ -146,52 +223,53 @@ export function ExpenseGrid({
 
   const renderSortableItem = React.useCallback<SortableGridRenderItem<ExpenseItem>>(
     ({ item }) => {
-      const transform =
-        isDragActive && item.id !== activeDragId
-          ? [{ rotate: wiggleRotate } as const]
-          : undefined;
+      const isCategory = item.kind === "category";
+      const shouldWiggleItem =
+        shouldWiggle && isDragActive && isCategory && item.id !== activeDragId;
       return (
-        <Animated.View style={transform ? { transform } : undefined}>
-          <ExpenseBox
-            amount={item.amount}
-            backgroundColor={item.backgroundColor}
-            circleColor={item.circleColor}
-            icon={item.icon}
-            name={item.name}
-            iconColor={item.iconColor}
-            budgetUsageRatio={item.budgetUsageRatio}
-            trendPercent={item.trendPercent}
-            isEditing
-            cardWidth={ITEM_WIDTH}
-            cardHeight={ITEM_HEIGHT}
-            onDelete={() => onDeleteItem?.(item)}
+        <Sortable.Handle mode={isCategory ? "draggable" : "fixed-order"}>
+          <SortableItemCard
+            item={item}
+            isCategory={isCategory}
+            isEditing={isEditing}
+            shouldWiggleItem={shouldWiggleItem}
+            wiggleRotate={wiggleRotate}
+            onPressItem={onPressItem}
+            onLongPressItem={onLongPressItem}
+            onDeleteItem={onDeleteItem}
           />
-        </Animated.View>
+        </Sortable.Handle>
       );
     },
-    [activeDragId, isDragActive, onDeleteItem, wiggleRotate],
+    [activeDragId, isDragActive, isEditing, onDeleteItem, onLongPressItem, onPressItem, shouldWiggle, wiggleRotate],
   );
 
-  if (canReorder) {
+  if (canUseSortable) {
     return (
-      <View style={[styles.content, { width: GRID_CONTENT_WIDTH }]}>
+      <Pressable
+        onPress={isEditing ? onBackgroundPress : undefined}
+        style={[styles.content, { width: GRID_CONTENT_WIDTH }]}
+      >
         <Sortable.Grid
-          data={categoryItems}
+          data={items}
           keyExtractor={(item) => item.id}
           columns={GRID_COLUMNS}
           rowGap={ITEM_GAP_BOTTOM}
           columnGap={ITEM_GAP_RIGHT}
-          dragActivationDelay={90}
+          dragActivationDelay={160}
+          dropAnimationDuration={120}
           overflow="visible"
+          customHandle
           activeItemScale={1}
           activeItemOpacity={1}
           inactiveItemScale={1}
           inactiveItemOpacity={1}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
+          onActiveItemDropped={handleActiveItemDropped}
           renderItem={renderSortableItem}
         />
-      </View>
+      </Pressable>
     );
   }
 
@@ -241,11 +319,7 @@ export function ExpenseGrid({
               isEditing={item.kind === "category" && isEditing}
               cardWidth={cardWidth}
               cardHeight={cardHeight}
-              onPress={
-                isEditing && isCategory
-                  ? undefined
-                  : () => onPressItem?.(item)
-              }
+              onPress={() => onPressItem?.(item)}
               onLongPress={
                 isEditing && isCategory
                   ? undefined

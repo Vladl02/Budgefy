@@ -44,7 +44,7 @@ import { ActivityIndicator, Alert, Animated, Modal, Pressable, ScrollView, Style
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { getAppPreference, setAppPreference } from "@/src/utils/preferences";
-import { categoriesForMonth, paymentSumsByCategory } from "@/src/utils/queries";
+import { categoriesForMonth, paymentSumsByCategoryForMonth } from "@/src/utils/queries";
 import { drizzle, useLiveQuery } from "drizzle-orm/expo-sqlite";
 import { useSQLiteContext } from "expo-sqlite";
 
@@ -219,7 +219,7 @@ export default function HomeContent() {
   const insets = useSafeAreaInsets();
 
   const dbExpo = useSQLiteContext();
-  const db = drizzle(dbExpo);
+  const db = useMemo(() => drizzle(dbExpo), [dbExpo]);
   const [isAddCategoryVisible, setAddCategoryVisible] = useState(false);
   const [isCreatingCategory, setIsCreatingCategory] = useState(false);
   const [selectedCategoryPreset, setSelectedCategoryPreset] = useState<string | null>(null);
@@ -280,8 +280,8 @@ export default function HomeContent() {
     [db, currentMonth],
   );
   const paymentsQuery = useMemo(
-    () => paymentSumsByCategory(db),
-    [db],
+    () => paymentSumsByCategoryForMonth(db, currentMonth),
+    [currentMonth, db],
   );
 
   const { data: categoriesData } = useLiveQuery(categoriesQuery);

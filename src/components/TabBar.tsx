@@ -1,7 +1,6 @@
 import { useAppTheme } from "@/src/providers/AppThemeProvider";
 import {
   analyzeReceiptWithSupabase,
-  saveScannedReceiptsAsSpending,
   scanReceiptImages,
 } from "@/src/utils/receiptScanner";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
@@ -9,7 +8,7 @@ import { Text } from "@react-navigation/elements";
 import { useSQLiteContext } from "expo-sqlite";
 import { ChartPie, House, ScanLine, Scroll, Settings } from "lucide-react-native";
 import { useCallback, useRef } from "react";
-import { Alert, InteractionManager, Pressable, StyleSheet, View } from "react-native";
+import { Alert, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const ICONS_BY_ROUTE = {
@@ -52,21 +51,8 @@ export function MyTabBar({ state, descriptors, navigation }: BottomTabBarProps) 
       }
 
       if (scanResult.scannedImages.length > 0) {
-        void analyzeReceiptWithSupabase(db, scanResult.scannedImages[0]);
+        await analyzeReceiptWithSupabase(db, scanResult.scannedImages[0]);
       }
-
-      InteractionManager.runAfterInteractions(() => {
-        void saveScannedReceiptsAsSpending(db, scanResult.scannedImages)
-          .then((saveResult) => {
-            if (saveResult.status === "no_user_category") {
-              Alert.alert("Cannot save", "No user/category found to attach this scanned receipt.");
-            }
-          })
-          .catch((error) => {
-            console.error("Failed to persist scanned receipt from tab shortcut:", error);
-            Alert.alert("Save failed", "Scanner closed, but receipt could not be saved.");
-          });
-      });
     } catch (error) {
       console.error("Failed to scan receipt from tab shortcut:", error);
       Alert.alert("Scan failed", "Could not open/save scanner result.");

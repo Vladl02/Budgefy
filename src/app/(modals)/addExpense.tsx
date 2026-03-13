@@ -2,7 +2,7 @@ import { useNavigation } from "@react-navigation/native";
 import { router, useLocalSearchParams } from "expo-router";
 import { Check, Delete, Equal } from "lucide-react-native";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, BackHandler, Dimensions, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, BackHandler, Dimensions, InteractionManager, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   Easing,
@@ -26,7 +26,6 @@ import {
   getCachedCategoryColor,
   getCachedRecommendationNames,
   normalizeRecommendationName,
-  setCachedRecommendationNames,
 } from "@/src/utils/recommendations";
 
 type CalcOperator = "add" | "subtract" | "multiply" | "divide";
@@ -169,7 +168,6 @@ export default function AddExpense() {
   const [subcategoryOptions, setSubcategoryOptions] = useState<string[]>([]);
   const [shopOptions, setShopOptions] = useState<string[]>([]);
   const [activePicker, setActivePicker] = useState<"subcategory" | "shop" | null>(null);
-  const [isSavingExpense, setIsSavingExpense] = useState(false);
   const isSavingExpenseRef = useRef(false);
 
   const sheetHeight = Dimensions.get("screen").height * 0.9;
@@ -545,36 +543,6 @@ export default function AddExpense() {
     );
   };
 
-  const addSubcategoryToStateAndCache = (value: string) => {
-    const trimmed = value.trim().replace(/\s+/g, " ");
-    if (!trimmed) return;
-
-    setSubcategoryOptions((prev) => {
-      const exists = findCaseInsensitiveMatch(prev, trimmed);
-      if (exists) return prev;
-      const next = [trimmed, ...prev];
-      if (recommendationContextKey) {
-        setCachedRecommendationNames("subcategory", recommendationContextKey, next);
-      }
-      return next;
-    });
-  };
-
-  const addShopToStateAndCache = (value: string) => {
-    const trimmed = value.trim().replace(/\s+/g, " ");
-    if (!trimmed) return;
-
-    setShopOptions((prev) => {
-      const exists = findCaseInsensitiveMatch(prev, trimmed);
-      if (exists) return prev;
-      const next = [trimmed, ...prev];
-      if (recommendationContextKey) {
-        setCachedRecommendationNames("shop", recommendationContextKey, next);
-      }
-      return next;
-    });
-  };
-
   const handleSelectSubcategory = (value: string) => {
     setSelectedSubcategory(value);
     if (
@@ -643,66 +611,63 @@ export default function AddExpense() {
     const trimmedProductName = productName.trim();
     const representativeProductName = trimmedProductName || "Manual entry";
     const isPlaceholderProduct = trimmedProductName ? 0 : 1;
+    const selectedSubcategorySnapshot = selectedSubcategory;
+    const selectedShopNameSnapshot = selectedShopName;
+    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
 
-    try {
-      isSavingExpenseRef.current = true;
-      setIsSavingExpense(true);
-      let resolvedCategoryId = selectedCategoryId;
+    isSavingExpenseRef.current = true;
+    handleClose();
 
-      if (!resolvedCategoryId && resolvedCategoryName) {
-        const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
-        const categoryRow = await dbExpo.getFirstAsync<{ id: number }>(
-          `SELECT id
-           FROM categories
-           WHERE user_id = ? AND category_name = ? AND month_start = ?
-           LIMIT 1`,
-          [selectedCategoryUserId, resolvedCategoryName, monthStart],
-        );
-        resolvedCategoryId = categoryRow?.id ?? null;
-      }
+    InteractionManager.runAfterInteractions(() => {
+      void (async () => {
+        try {
+          let resolvedCategoryId = selectedCategoryId;
 
-      if (!resolvedCategoryId) {
-        console.error("Cannot save expense: category id could not be resolved");
-        Alert.alert("Could not save", "Category not found. Please reopen the modal.");
-        return;
-      }
+          if (!resolvedCategoryId && resolvedCategoryName) {
+            const categoryRow = await dbExpo.getFirstAsync<{ id: number }>(
+              `SELECT id
+               FROM categories
+               WHERE user_id = ? AND category_name = ? AND month_start = ?
+               LIMIT 1`,
+              [selectedCategoryUserId, resolvedCategoryName, monthStart],
+            );
+            resolvedCategoryId = categoryRow?.id ?? null;
+          }
 
-      const paymentResult = await dbExpo.runAsync(
-        `INSERT INTO payments (sum, market_name, source_type, user_id, category_id)
-         VALUES (?, ?, ?, ?, ?)`,
-        [amountInCents, marketName, "manual", selectedCategoryUserId, resolvedCategoryId],
-      );
+          if (!resolvedCategoryId) {
+            console.error("Cannot save expense: category id could not be resolved");
+            Alert.alert("Could not save", "Category not found. Please reopen the modal.");
+            return;
+          }
 
-      const paymentId = Number(paymentResult.lastInsertRowId);
-      if (!Number.isFinite(paymentId) || paymentId <= 0) {
-        throw new Error("Failed to resolve inserted payment id");
-      }
+          const paymentResult = await dbExpo.runAsync(
+            `INSERT INTO payments (sum, market_name, source_type, user_id, category_id)
+             VALUES (?, ?, ?, ?, ?)`,
+            [amountInCents, marketName, "manual", selectedCategoryUserId, resolvedCategoryId],
+          );
 
-      await dbExpo.runAsync(
-        `INSERT INTO products (name, price, category_id, origin_type, is_placeholder, user_id, payment_id, first_subcategory, other_subcategories)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          representativeProductName,
-          amountInCents,
-          resolvedCategoryId,
-          "manual",
-          isPlaceholderProduct,
-          selectedCategoryUserId,
-          paymentId,
-          selectedSubcategory ?? null,
-          null,
-        ],
-      );
+          const paymentId = Number(paymentResult.lastInsertRowId);
+          if (!Number.isFinite(paymentId) || paymentId <= 0) {
+            throw new Error("Failed to resolve inserted payment id");
+          }
 
-      const selectedSubcategorySnapshot = selectedSubcategory;
-      const selectedShopNameSnapshot = selectedShopName;
-      setPendingNewSubcategory(null);
-      setPendingNewShopName(null);
-      handleClose();
+          await dbExpo.runAsync(
+            `INSERT INTO products (name, price, category_id, origin_type, is_placeholder, user_id, payment_id, first_subcategory, other_subcategories)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              representativeProductName,
+              amountInCents,
+              resolvedCategoryId,
+              "manual",
+              isPlaceholderProduct,
+              selectedCategoryUserId,
+              paymentId,
+              selectedSubcategorySnapshot ?? null,
+              null,
+            ],
+          );
 
-      if (selectedSubcategorySnapshot || selectedShopNameSnapshot) {
-        void (async () => {
-          try {
+          if (selectedSubcategorySnapshot || selectedShopNameSnapshot) {
             await Promise.all([
               selectedSubcategorySnapshot
                 ? upsertSubcategoryPreset(selectedSubcategorySnapshot, true)
@@ -711,24 +676,15 @@ export default function AddExpense() {
                 ? upsertShopPreset(selectedShopNameSnapshot, true)
                 : Promise.resolve(),
             ]);
-            if (selectedSubcategorySnapshot) {
-              addSubcategoryToStateAndCache(selectedSubcategorySnapshot);
-            }
-            if (selectedShopNameSnapshot) {
-              addShopToStateAndCache(selectedShopNameSnapshot);
-            }
-          } catch (presetError) {
-            console.error("Failed to update recommendation presets:", presetError);
           }
-        })();
-      }
-    } catch (error) {
-      console.error("Failed to save expense:", error);
-      Alert.alert("Could not save", "Database write failed. Check logs and try again.");
-    } finally {
-      isSavingExpenseRef.current = false;
-      setIsSavingExpense(false);
-    }
+        } catch (error) {
+          console.error("Failed to save expense:", error);
+          Alert.alert("Could not save", "Database write failed. Check logs and try again.");
+        } finally {
+          isSavingExpenseRef.current = false;
+        }
+      })();
+    });
   };
 
   const handleKeyPress = (key: string) => {
@@ -877,7 +833,7 @@ export default function AddExpense() {
               {KEYPAD_KEYS.map((key) => {
                 const isCurrencyKey = key === "CURRENCY";
                 const isConfirmKey = key === ">";
-                const isConfirmDisabled = isConfirmKey && isSavingExpense;
+                const isConfirmDisabled = false;
                 const displayLabel = key === "*/%" ? "x/" : key;
 
                 if (isCurrencyKey) {
@@ -906,9 +862,7 @@ export default function AddExpense() {
                     ]}
                   >
                     {isConfirmKey ? (
-                      isSavingExpense ? (
-                        <ActivityIndicator size="small" color={styles.keyTextAccent.color} />
-                      ) : readyCalcState ? (
+                      readyCalcState ? (
                         <Check size={18} color={styles.keyTextAccent.color} />
                       ) : (
                         <Equal size={18} color={styles.keyTextAccent.color} />

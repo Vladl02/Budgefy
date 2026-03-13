@@ -1,4 +1,4 @@
-import { categoriesForMonth, paymentSumsByCategory } from "@/src/utils/queries";
+import { categoriesForMonth, paymentSumsByCategoryForMonth } from "@/src/utils/queries";
 import { drizzle, useLiveQuery } from "drizzle-orm/expo-sqlite";
 import { useRouter } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
@@ -35,7 +35,7 @@ export default function Overview() {
   const [quickBudgetTarget, setQuickBudgetTarget] = useState<SummaryItem | null>(null);
   const [quickBudgetInput, setQuickBudgetInput] = useState("");
   const dbExpo = useSQLiteContext();
-  const db = drizzle(dbExpo);
+  const db = useMemo(() => drizzle(dbExpo), [dbExpo]);
   const currentMonth = useMemo(
     () => new Date(new Date().getFullYear(), new Date().getMonth(), 1),
     [],
@@ -45,8 +45,8 @@ export default function Overview() {
     [db, currentMonth],
   );
   const paymentsQuery = useMemo(
-    () => paymentSumsByCategory(db),
-    [db],
+    () => paymentSumsByCategoryForMonth(db, currentMonth),
+    [currentMonth, db],
   );
   const { data: categoriesData } = useLiveQuery(categoriesQuery);
   const { data: paymentSumsData } = useLiveQuery(paymentsQuery);
