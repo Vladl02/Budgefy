@@ -1,5 +1,7 @@
 import { categories as categoriesTable, payments as paymentsTable, users } from "@/src/db/schema";
+import { useAppTheme } from "@/src/providers/AppThemeProvider";
 import { categoriesForMonth } from "@/src/utils/queries";
+import { useIsFocused } from "@react-navigation/native";
 import { desc, eq } from "drizzle-orm";
 import { drizzle, useLiveQuery } from "drizzle-orm/expo-sqlite";
 import * as Haptics from "expo-haptics";
@@ -27,6 +29,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Alert,
   Animated,
+  Easing,
   FlatList,
   Image,
   Linking,
@@ -59,6 +62,12 @@ interface ReceiptItem {
 const FILTER_OPTIONS = ["All", "Receipts", "Cash", "Card", "Needs Action"] as const;
 const MONTH_LABEL_FORMAT: Intl.DateTimeFormatOptions = { month: "long", year: "numeric" };
 const formatMonthLabel = (date: Date): string => date.toLocaleDateString("en-US", MONTH_LABEL_FORMAT);
+const CURRENCY_FORMAT_OPTIONS: Intl.NumberFormatOptions = {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+};
+const formatCurrencyValue = (value: number): string => value.toLocaleString("en-US", CURRENCY_FORMAT_OPTIONS);
+let lastKnownTotalSpendValue: number | null = null;
 
 // --- INITIAL DATA ---
 const INITIAL_DATA: ReceiptItem[] = [
@@ -210,6 +219,8 @@ const INITIAL_DATA: ReceiptItem[] = [
 
 // --- MAIN SCREEN ---
 export default function Reports() {
+  const isFocused = useIsFocused();
+  const { isDark } = useAppTheme();
   const [receiptEdits, setReceiptEdits] = useState<Record<string, ReceiptItem>>({});
   const [selectedReceipt, setSelectedReceipt] = useState<ReceiptItem | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
@@ -310,9 +321,115 @@ export default function Reports() {
       return sum + numericAmount;
     }, 0);
   }, [monthFilteredReceipts]);
-  const totalSpend = useMemo(
-    () => totalSpendValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-    [totalSpendValue],
+  const [committedTotalSpendValue, setCommittedTotalSpendValue] = useState<number>(
+    () => lastKnownTotalSpendValue ?? totalSpendValue,
+  );
+  const [incomingTotalSpendValue, setIncomingTotalSpendValue] = useState<number | null>(null);
+  const committedTotalSpendRef = useRef<number>(lastKnownTotalSpendValue ?? totalSpendValue);
+  const incomingTotalSpendRef = useRef<number | null>(null);
+  const pendingTotalSpendValue = useRef<number | null>(null);
+  const totalSpendFlowProgress = useRef(new Animated.Value(1)).current;
+
+  const animateTotalSpend = useCallback(
+    (nextValue: number) => {
+      const baseValue = incomingTotalSpendRef.current ?? committedTotalSpendRef.current;
+      const normalizedBase = Math.round((baseValue + Number.EPSILON) * 100) / 100;
+      const normalizedNext = Math.round((nextValue + Number.EPSILON) * 100) / 100;
+      const hasMeaningfulDelta = Math.abs(normalizedBase - normalizedNext) >= 0.005;
+
+      totalSpendFlowProgress.stopAnimation();
+
+      if (!hasMeaningfulDelta) {
+        totalSpendFlowProgress.setValue(1);
+        committedTotalSpendRef.current = normalizedNext;
+        incomingTotalSpendRef.current = null;
+        setCommittedTotalSpendValue(normalizedNext);
+        setIncomingTotalSpendValue(null);
+        lastKnownTotalSpendValue = normalizedNext;
+        return;
+      }
+
+      committedTotalSpendRef.current = normalizedBase;
+      incomingTotalSpendRef.current = normalizedNext;
+      setCommittedTotalSpendValue(normalizedBase);
+      setIncomingTotalSpendValue(normalizedNext);
+      totalSpendFlowProgress.setValue(0);
+
+      Animated.timing(totalSpendFlowProgress, {
+        toValue: 1,
+        delay: 110,
+        duration: 650,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }).start(({ finished }) => {
+        if (!finished) {
+          return;
+        }
+
+        committedTotalSpendRef.current = normalizedNext;
+        incomingTotalSpendRef.current = null;
+        setCommittedTotalSpendValue(normalizedNext);
+        setIncomingTotalSpendValue(null);
+        lastKnownTotalSpendValue = normalizedNext;
+      });
+    },
+    [totalSpendFlowProgress],
+  );
+
+  useEffect(() => {
+    if (!isFocused) {
+      pendingTotalSpendValue.current = totalSpendValue;
+      return;
+    }
+
+    const targetValue = pendingTotalSpendValue.current ?? totalSpendValue;
+    pendingTotalSpendValue.current = null;
+    animateTotalSpend(targetValue);
+  }, [animateTotalSpend, isFocused, totalSpendValue]);
+
+  useEffect(() => {
+    return () => {
+      totalSpendFlowProgress.stopAnimation();
+    };
+  }, [totalSpendFlowProgress]);
+
+  const committedTotalSpendDisplay = useMemo(() => formatCurrencyValue(committedTotalSpendValue), [committedTotalSpendValue]);
+  const incomingTotalSpendDisplay = useMemo(
+    () => (incomingTotalSpendValue === null ? null : formatCurrencyValue(incomingTotalSpendValue)),
+    [incomingTotalSpendValue],
+  );
+  const totalSpendSizerText = useMemo(() => {
+    if (!incomingTotalSpendDisplay) {
+      return committedTotalSpendDisplay;
+    }
+
+    return incomingTotalSpendDisplay.length >= committedTotalSpendDisplay.length
+      ? incomingTotalSpendDisplay
+      : committedTotalSpendDisplay;
+  }, [committedTotalSpendDisplay, incomingTotalSpendDisplay]);
+  const outgoingTotalTranslateY = useMemo(
+    () => totalSpendFlowProgress.interpolate({ inputRange: [0, 1], outputRange: [0, -34] }),
+    [totalSpendFlowProgress],
+  );
+  const incomingTotalTranslateY = useMemo(
+    () => totalSpendFlowProgress.interpolate({ inputRange: [0, 1], outputRange: [34, 0] }),
+    [totalSpendFlowProgress],
+  );
+  const outgoingTotalOpacity = useMemo(
+    () => totalSpendFlowProgress.interpolate({ inputRange: [0, 0.8, 1], outputRange: [1, 0.15, 0] }),
+    [totalSpendFlowProgress],
+  );
+  const incomingTotalOpacity = useMemo(
+    () => totalSpendFlowProgress.interpolate({ inputRange: [0, 0.2, 1], outputRange: [0.05, 0.45, 1] }),
+    [totalSpendFlowProgress],
+  );
+  const outgoingTotalBlur = useMemo(
+    () => totalSpendFlowProgress.interpolate({ inputRange: [0, 1], outputRange: [0, 8] }),
+    [totalSpendFlowProgress],
+  );
+  const incomingTotalBlur = useMemo(
+    () => totalSpendFlowProgress.interpolate({ inputRange: [0, 1], outputRange: [9, 0] }),
+    [totalSpendFlowProgress],
   );
 
   const previousMonthStart = useMemo(
@@ -467,10 +584,10 @@ export default function Reports() {
   const listHeader = useMemo(
     () => (
       <View style={styles.controlsSection}>
-        <View style={styles.searchBar}>
+        <View style={[styles.searchBar, isDark ? styles.searchBarDark : null]}>
           <Search size={20} color="#8E8E93" />
           <TextInput
-            style={styles.searchInput}
+            style={[styles.searchInput, isDark ? styles.searchInputDark : null]}
             placeholder="Search reports..."
             placeholderTextColor="#8E8E93"
           />
@@ -480,10 +597,20 @@ export default function Reports() {
           {FILTER_OPTIONS.map((filter) => (
             <TouchableOpacity
               key={filter}
-              style={[styles.filterChip, activeFilter === filter && styles.filterChipActive]}
+              style={[
+                styles.filterChip,
+                isDark ? styles.filterChipDark : null,
+                activeFilter === filter && styles.filterChipActive,
+              ]}
               onPress={() => handleFilterChange(filter)}
             >
-              <Text style={[styles.filterText, activeFilter === filter && styles.filterTextActive]}>
+              <Text
+                style={[
+                  styles.filterText,
+                  isDark ? styles.filterTextDark : null,
+                  activeFilter === filter && styles.filterTextActive,
+                ]}
+              >
                 {filter}
               </Text>
             </TouchableOpacity>
@@ -491,37 +618,89 @@ export default function Reports() {
         </ScrollView>
       </View>
     ),
-    [activeFilter, handleFilterChange],
+    [activeFilter, handleFilterChange, isDark],
   );
 
   return (
-    <View style={styles.background}>
+    <View style={[styles.background, isDark ? styles.backgroundDark : null]}>
       <SafeAreaView style={{ flex: 1 }}>
         {/* Header & Summary */}
         <View style={styles.headerContainer}>
           <View style={styles.headerTop}>
             <View>
-              <Text style={styles.pageTitle}>Reports</Text>
+              <Text style={[styles.pageTitle, isDark ? styles.pageTitleDark : null]}>Reports</Text>
             </View>
-            <TouchableOpacity style={styles.headerBadge} activeOpacity={0.85} onPress={handleOpenMonthPicker}>
+            <TouchableOpacity
+              style={[styles.headerBadge, isDark ? styles.headerBadgeDark : null]}
+              activeOpacity={0.85}
+              onPress={handleOpenMonthPicker}
+            >
               <View style={styles.headerBadgeDot} />
-              <Text style={styles.headerBadgeText}>{currentMonthLabel}</Text>
-              <ChevronDown size={14} color="#111827" style={{ marginLeft: 6 }} />
+              <Text style={[styles.headerBadgeText, isDark ? styles.headerBadgeTextDark : null]}>{currentMonthLabel}</Text>
+              <ChevronDown size={14} color={isDark ? "#E5E7EB" : "#111827"} style={{ marginLeft: 6 }} />
             </TouchableOpacity>
           </View>
 
-          <View style={styles.summaryCard}>
-            <View>
-              <Text style={styles.summaryLabel}>Total Spend</Text>
-              <Text style={styles.summaryAmount}>RON {totalSpend}</Text>
+          <View style={[styles.summaryCard, isDark ? styles.summaryCardDark : null]}>
+            <View style={styles.summaryMain}>
+              <Text style={[styles.summaryLabel, isDark ? styles.summaryLabelDark : null]}>Total Spend</Text>
+              <View style={styles.summaryAmountRow}>
+                <Text style={[styles.summaryAmountCurrency, isDark ? styles.summaryAmountTextDark : null]}>RON</Text>
+                <View style={styles.summaryAmountViewport}>
+                  <Text style={[styles.summaryAmountNumber, styles.summaryAmountSizer, isDark ? styles.summaryAmountTextDark : null]}>
+                    {totalSpendSizerText}
+                  </Text>
+                  {incomingTotalSpendDisplay ? (
+                    <>
+                      <Animated.Text
+                        style={[
+                          styles.summaryAmountNumber,
+                          styles.summaryAmountAnimatedLayer,
+                          isDark ? styles.summaryAmountTextDark : null,
+                          {
+                            opacity: outgoingTotalOpacity,
+                            transform: [{ translateY: outgoingTotalTranslateY }],
+                            textShadowRadius: outgoingTotalBlur,
+                          },
+                        ]}
+                      >
+                        {committedTotalSpendDisplay}
+                      </Animated.Text>
+                      <Animated.Text
+                        style={[
+                          styles.summaryAmountNumber,
+                          styles.summaryAmountAnimatedLayer,
+                          isDark ? styles.summaryAmountTextDark : null,
+                          {
+                            opacity: incomingTotalOpacity,
+                            transform: [{ translateY: incomingTotalTranslateY }],
+                            textShadowRadius: incomingTotalBlur,
+                          },
+                        ]}
+                      >
+                        {incomingTotalSpendDisplay}
+                      </Animated.Text>
+                    </>
+                  ) : (
+                    <Text style={[styles.summaryAmountNumber, styles.summaryAmountAnimatedLayer, isDark ? styles.summaryAmountTextDark : null]}>
+                      {committedTotalSpendDisplay}
+                    </Text>
+                  )}
+                </View>
+              </View>
             </View>
             <TouchableOpacity
               activeOpacity={0.85}
               onPress={handleOpenTrendInfo}
               style={[styles.trendBadge, { backgroundColor: trendBackgroundColor }]}
             >
-              <TrendIcon size={14} color={trendColor} />
-              <Text style={[styles.trendText, { color: trendColor }]}>{trendLabel}</Text>
+              <TrendIcon size={13} color={trendColor} />
+              <Text
+                numberOfLines={1}
+                style={[styles.trendText, { color: trendColor }]}
+              >
+                {trendLabel}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -637,24 +816,25 @@ const ReportCard = React.memo(function ReportCard({
   status,
   receiptPhotoUri,
 }: ReportCardProps) {
+  const { isDark } = useAppTheme();
   const config = STATUS_CONFIG[status as keyof typeof STATUS_CONFIG] || STATUS_CONFIG.processed;
 
   return (
-    <View style={cardStyles.card}>
-      <View style={cardStyles.iconContainer}>
+    <View style={[cardStyles.card, isDark ? cardStyles.cardDark : null]}>
+      <View style={[cardStyles.iconContainer, isDark ? cardStyles.iconContainerDark : null]}>
         {receiptPhotoUri ? (
           <Image source={{ uri: receiptPhotoUri }} style={cardStyles.receiptImage} />
         ) : (
-          <ReceiptText size={22} color="#111111" />
+          <ReceiptText size={22} color={isDark ? "#E5E7EB" : "#111111"} />
         )}
       </View>
       <View style={cardStyles.textColumn}>
-        <Text style={cardStyles.titleText}>{title}</Text>
-        <Text style={cardStyles.metaText}>{date}</Text>
+        <Text style={[cardStyles.titleText, isDark ? cardStyles.titleTextDark : null]}>{title}</Text>
+        <Text style={[cardStyles.metaText, isDark ? cardStyles.metaTextDark : null]}>{date}</Text>
       </View>
       <View style={{ flex: 1 }} />
       <View style={cardStyles.rightColumn}>
-        <Text style={cardStyles.amount}>{amount}</Text>
+        <Text style={[cardStyles.amount, isDark ? cardStyles.amountDark : null]}>{amount}</Text>
         <View style={[cardStyles.statusPill, { backgroundColor: config.bg }]}>
           <View style={[cardStyles.statusDot, { backgroundColor: config.color }]} />
           <Text style={[cardStyles.statusText, { color: config.color }]}>{config.label}</Text>
@@ -666,6 +846,7 @@ const ReportCard = React.memo(function ReportCard({
 
 // --- RECEIPT DETAIL MODAL (NEW DESIGN: Sticky summary + sticky Save) ---
 function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap, onClose, onSave }: any) {
+  const { isDark } = useAppTheme();
   const sheetTranslateY = useRef(new Animated.Value(0)).current;
   const [name, setName] = useState("");
   const [dateVal, setDateVal] = useState("");
@@ -872,19 +1053,21 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
       allowSwipeDismissal
       onRequestClose={onClose}
     >
-      <Animated.View style={[editStyles.container, { transform: [{ translateY: sheetTranslateY }] }]}>
-        <View style={editStyles.dragHandleArea} {...dragResponder.panHandlers}>
-          <View style={editStyles.dragHandle} />
+      <Animated.View style={[editStyles.container, isDark ? editStyles.containerDark : null, { transform: [{ translateY: sheetTranslateY }] }]}>
+        <View style={[editStyles.dragHandleArea, isDark ? editStyles.dragHandleAreaDark : null]} {...dragResponder.panHandlers}>
+          <View style={[editStyles.dragHandle, isDark ? editStyles.dragHandleDark : null]} />
         </View>
         {/* Header */}
-        <View style={editStyles.header} {...dragResponder.panHandlers}>
-          <TouchableOpacity onPress={onClose} style={editStyles.headerIconBtn}>
-            <ArrowLeft color="#111" size={20} />
+        <View style={[editStyles.header, isDark ? editStyles.headerDark : null]} {...dragResponder.panHandlers}>
+          <TouchableOpacity onPress={onClose} style={[editStyles.headerIconBtn, isDark ? editStyles.headerIconBtnDark : null]}>
+            <ArrowLeft color={isDark ? "#E5E7EB" : "#111"} size={20} />
           </TouchableOpacity>
 
           <View style={editStyles.headerTitleWrap}>
-            <Text style={editStyles.headerTitle}>Edit Receipt</Text>
-            <Text style={editStyles.headerSubtitle}>Review and update details</Text>
+            <Text style={[editStyles.headerTitle, isDark ? editStyles.headerTitleDark : null]}>Edit Receipt</Text>
+            <Text style={[editStyles.headerSubtitle, isDark ? editStyles.headerSubtitleDark : null]}>
+              Review and update details
+            </Text>
           </View>
 
           {/* Keep header clean; Save is sticky at bottom */}
@@ -892,22 +1075,22 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
         </View>
 
         {/* Sticky Summary Card */}
-        <View style={editStyles.stickySummaryWrap}>
-          <View style={editStyles.summaryCard}>
+        <View style={[editStyles.stickySummaryWrap, isDark ? editStyles.stickySummaryWrapDark : null]}>
+          <View style={[editStyles.summaryCard, isDark ? editStyles.summaryCardDark : null]}>
             <View style={{ flex: 1 }}>
-              <Text style={editStyles.summaryLabel}>Amount</Text>
-              <Text style={editStyles.summaryAmount}>
+              <Text style={[editStyles.summaryLabel, isDark ? editStyles.summaryLabelDark : null]}>Amount</Text>
+              <Text style={[editStyles.summaryAmount, isDark ? editStyles.summaryAmountDark : null]}>
                 {currency} {Number(parseFloat(price || "0")).toFixed(2)}
               </Text>
 
               <View style={editStyles.pillsRow}>
                 <TouchableOpacity
                   activeOpacity={0.85}
-                  style={[editStyles.pill, editStyles.pillDark]}
+                  style={[editStyles.pill, isDark ? editStyles.pillDark : editStyles.pillLight]}
                   onPress={() => setShowCurrencyPicker(true)}
                 >
-                  <Text style={editStyles.pillTextDark}>{currency}</Text>
-                  <ChevronRight size={14} color="#fff" style={{ marginLeft: 6 }} />
+                  <Text style={[editStyles.pillTextDark, !isDark ? editStyles.pillTextLight : null]}>{currency}</Text>
+                  <ChevronRight size={14} color={isDark ? "#fff" : "#111827"} style={{ marginLeft: 6 }} />
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -923,7 +1106,7 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
             </View>
 
             <TouchableOpacity
-              style={editStyles.receiptThumb}
+              style={[editStyles.receiptThumb, isDark ? editStyles.receiptThumbDark : null]}
               activeOpacity={0.85}
               onPress={handleReceiptPress}
             >
@@ -932,7 +1115,7 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
               ) : (
                 <>
                   <ReceiptText color="#A1A1AA" size={22} />
-                  <Text style={editStyles.receiptThumbText}>Receipt</Text>
+                  <Text style={[editStyles.receiptThumbText, isDark ? editStyles.receiptThumbTextDark : null]}>Receipt</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -942,11 +1125,11 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
         {/* Form */}
         <ScrollView contentContainerStyle={editStyles.content} showsVerticalScrollIndicator={false}>
           {/* Merchant */}
-          <View style={editStyles.sectionCard}>
-            <Text style={editStyles.sectionTitle}>Merchant</Text>
-            <View style={editStyles.inputWrap}>
+          <View style={[editStyles.sectionCard, isDark ? editStyles.sectionCardDark : null]}>
+            <Text style={[editStyles.sectionTitle, isDark ? editStyles.sectionTitleDark : null]}>Merchant</Text>
+            <View style={[editStyles.inputWrap, isDark ? editStyles.inputWrapDark : null]}>
               <TextInput
-                style={editStyles.input}
+                style={[editStyles.input, isDark ? editStyles.inputDark : null]}
                 placeholder="Name"
                 placeholderTextColor="#A1A1AA"
                 value={name}
@@ -957,26 +1140,31 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
 
           {/* Date + Price */}
           <View style={editStyles.row}>
-            <TouchableOpacity style={[editStyles.sectionCard, editStyles.half]} onPress={() => setShowDatePicker(true)}>
-              <Text style={editStyles.sectionTitle}>Date</Text>
+            <TouchableOpacity
+              style={[editStyles.sectionCard, isDark ? editStyles.sectionCardDark : null, editStyles.half]}
+              onPress={() => setShowDatePicker(true)}
+            >
+              <Text style={[editStyles.sectionTitle, isDark ? editStyles.sectionTitleDark : null]}>Date</Text>
               <View style={editStyles.valueRow}>
                 <View style={editStyles.dateValueWrap}>
-                  <View style={editStyles.dateValueIcon}>
-                    <CalendarIcon size={14} color="#111" />
+                  <View style={[editStyles.dateValueIcon, isDark ? editStyles.dateValueIconDark : null]}>
+                    <CalendarIcon size={14} color={isDark ? "#E5E7EB" : "#111"} />
                   </View>
                   <View>
-                    <Text style={editStyles.datePrimary}>{dateDisplay.primary}</Text>
-                    <Text style={editStyles.dateSecondary}>{dateDisplay.secondary}</Text>
+                    <Text style={[editStyles.datePrimary, isDark ? editStyles.datePrimaryDark : null]}>{dateDisplay.primary}</Text>
+                    <Text style={[editStyles.dateSecondary, isDark ? editStyles.dateSecondaryDark : null]}>
+                      {dateDisplay.secondary}
+                    </Text>
                   </View>
                 </View>
               </View>
             </TouchableOpacity>
 
-            <View style={[editStyles.sectionCard, editStyles.half]}>
-              <Text style={editStyles.sectionTitle}>Price</Text>
-              <View style={editStyles.inputWrap}>
+            <View style={[editStyles.sectionCard, isDark ? editStyles.sectionCardDark : null, editStyles.half]}>
+              <Text style={[editStyles.sectionTitle, isDark ? editStyles.sectionTitleDark : null]}>Price</Text>
+              <View style={[editStyles.inputWrap, isDark ? editStyles.inputWrapDark : null]}>
                 <TextInput
-                  style={editStyles.input}
+                  style={[editStyles.input, isDark ? editStyles.inputDark : null]}
                   value={price}
                   onChangeText={setPrice}
                   keyboardType="numeric"
@@ -988,23 +1176,26 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
           </View>
 
           {/* Category */}
-          <TouchableOpacity style={editStyles.sectionCard} onPress={() => setShowCategoryPicker(true)}>
-            <Text style={editStyles.sectionTitle}>Category</Text>
+          <TouchableOpacity
+            style={[editStyles.sectionCard, isDark ? editStyles.sectionCardDark : null]}
+            onPress={() => setShowCategoryPicker(true)}
+          >
+            <Text style={[editStyles.sectionTitle, isDark ? editStyles.sectionTitleDark : null]}>Category</Text>
             <View style={editStyles.valueRow}>
               <View style={editStyles.categoryValueWrap}>
                 <View style={[editStyles.categoryColorDot, { backgroundColor: selectedCategoryColor }]} />
-                <Text style={editStyles.valueText}>{category}</Text>
+                <Text style={[editStyles.valueText, isDark ? editStyles.valueTextDark : null]}>{category}</Text>
               </View>
-              <ChevronRight size={16} color="#C7C7CC" style={{ marginLeft: 8 }} />
+              <ChevronRight size={16} color={isDark ? "#9CA3AF" : "#C7C7CC"} style={{ marginLeft: 8 }} />
             </View>
           </TouchableOpacity>
 
           {/* Notes */}
-          <View style={editStyles.sectionCard}>
-            <Text style={editStyles.sectionTitle}>Notes</Text>
-            <View style={[editStyles.inputWrap, { height: 110, paddingVertical: 10 }]}>
+          <View style={[editStyles.sectionCard, isDark ? editStyles.sectionCardDark : null]}>
+            <Text style={[editStyles.sectionTitle, isDark ? editStyles.sectionTitleDark : null]}>Notes</Text>
+            <View style={[editStyles.inputWrap, isDark ? editStyles.inputWrapDark : null, { height: 110, paddingVertical: 10 }]}>
               <TextInput
-                style={[editStyles.input, { height: "100%", textAlignVertical: "top" }]}
+                style={[editStyles.input, isDark ? editStyles.inputDark : null, { height: "100%", textAlignVertical: "top" }]}
                 placeholder="Add a note (optional)"
                 placeholderTextColor="#A1A1AA"
                 value={comment}
@@ -1015,11 +1206,15 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
           </View>
 
           {/* Toggles */}
-          <View style={editStyles.sectionCard}>
-            <Text style={editStyles.sectionTitle}>Options</Text>
+          <View style={[editStyles.sectionCard, isDark ? editStyles.sectionCardDark : null]}>
+            <Text style={[editStyles.sectionTitle, isDark ? editStyles.sectionTitleDark : null]}>Options</Text>
 
             <TouchableOpacity
-              style={[editStyles.toggleRow, isFullPage && editStyles.toggleRowActive]}
+              style={[
+                editStyles.toggleRow,
+                isDark ? editStyles.toggleRowDark : null,
+                isFullPage && editStyles.toggleRowActive,
+              ]}
               onPress={() => setIsFullPage(!isFullPage)}
               activeOpacity={0.85}
             >
@@ -1027,8 +1222,10 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
                 {isFullPage && <Check size={12} color="#fff" strokeWidth={4} />}
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={editStyles.toggleTitle}>Full-Page</Text>
-                <Text style={editStyles.toggleSubtitle}>Mark if the receipt image is a full page.</Text>
+                <Text style={[editStyles.toggleTitle, isDark ? editStyles.toggleTitleDark : null]}>Full-Page</Text>
+                <Text style={[editStyles.toggleSubtitle, isDark ? editStyles.toggleSubtitleDark : null]}>
+                  Mark if the receipt image is a full page.
+                </Text>
               </View>
             </TouchableOpacity>
           </View>
@@ -1037,7 +1234,7 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
         </ScrollView>
 
         {/* Sticky bottom Save bar */}
-        <View style={editStyles.bottomBar}>
+        <View style={[editStyles.bottomBar, isDark ? editStyles.bottomBarDark : null]}>
           <TouchableOpacity
             activeOpacity={0.9}
             onPress={handleSave}
@@ -1176,11 +1373,11 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
       </Modal>
       <Modal visible={showStatusInfo} transparent animationType="fade" onRequestClose={() => setShowStatusInfo(false)}>
         <TouchableOpacity style={editStyles.statusInfoOverlay} activeOpacity={1} onPress={() => setShowStatusInfo(false)}>
-          <View style={editStyles.statusInfoCard} onStartShouldSetResponder={() => true}>
+          <View style={[editStyles.statusInfoCard, isDark ? editStyles.statusInfoCardDark : null]} onStartShouldSetResponder={() => true}>
             <View style={editStyles.statusInfoHeader}>
-              <Text style={editStyles.statusInfoTitle}>Receipt Status Guide</Text>
+              <Text style={[editStyles.statusInfoTitle, isDark ? editStyles.statusInfoTitleDark : null]}>Receipt Status Guide</Text>
               <TouchableOpacity onPress={() => setShowStatusInfo(false)} hitSlop={8}>
-                <X size={18} color="#111827" />
+                <X size={18} color={isDark ? "#E5E7EB" : "#111827"} />
               </TouchableOpacity>
             </View>
 
@@ -1189,8 +1386,10 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
                 <CheckCircle2 size={15} color="#34C759" />
               </View>
               <View style={editStyles.statusInfoTextWrap}>
-                <Text style={editStyles.statusInfoLabel}>Processed</Text>
-                <Text style={editStyles.statusInfoText}>Receipt data was read successfully and looks valid.</Text>
+                <Text style={[editStyles.statusInfoLabel, isDark ? editStyles.statusInfoLabelDark : null]}>Processed</Text>
+                <Text style={[editStyles.statusInfoText, isDark ? editStyles.statusInfoTextDark : null]}>
+                  Receipt data was read successfully and looks valid.
+                </Text>
               </View>
             </View>
 
@@ -1199,8 +1398,10 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
                 <Clock3 size={15} color="#FF9500" />
               </View>
               <View style={editStyles.statusInfoTextWrap}>
-                <Text style={editStyles.statusInfoLabel}>Needs action</Text>
-                <Text style={editStyles.statusInfoText}>Some fields may be missing; review and confirm details.</Text>
+                <Text style={[editStyles.statusInfoLabel, isDark ? editStyles.statusInfoLabelDark : null]}>Needs action</Text>
+                <Text style={[editStyles.statusInfoText, isDark ? editStyles.statusInfoTextDark : null]}>
+                  Some fields may be missing; review and confirm details.
+                </Text>
               </View>
             </View>
 
@@ -1209,12 +1410,14 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
                 <AlertTriangle size={15} color="#FF3B30" />
               </View>
               <View style={editStyles.statusInfoTextWrap}>
-                <Text style={editStyles.statusInfoLabel}>Failed</Text>
-                <Text style={editStyles.statusInfoText}>Receipt parsing failed, so manual review is required.</Text>
+                <Text style={[editStyles.statusInfoLabel, isDark ? editStyles.statusInfoLabelDark : null]}>Failed</Text>
+                <Text style={[editStyles.statusInfoText, isDark ? editStyles.statusInfoTextDark : null]}>
+                  Receipt parsing failed, so manual review is required.
+                </Text>
               </View>
             </View>
 
-            <Text style={editStyles.statusInfoHint}>Tap outside to dismiss.</Text>
+            <Text style={[editStyles.statusInfoHint, isDark ? editStyles.statusInfoHintDark : null]}>Tap outside to dismiss.</Text>
           </View>
         </TouchableOpacity>
       </Modal>
@@ -1230,6 +1433,7 @@ interface DatePickerProps {
   onSelect: (date: string) => void;
 }
 const SimpleDatePickerModal = ({ visible, currentDate, onClose, onSelect }: DatePickerProps) => {
+  const { isDark } = useAppTheme();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(300)).current;
   const [showModal, setShowModal] = useState(visible);
@@ -1316,26 +1520,32 @@ const SimpleDatePickerModal = ({ visible, currentDate, onClose, onSelect }: Date
     <Modal visible={showModal} transparent animationType="none" onRequestClose={onClose}>
       <Animated.View style={[modalStyles.overlay, { opacity: fadeAnim }]}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
-        <Animated.View style={[pickerStyles.container, { transform: [{ translateY: slideAnim }] }]}>
+        <Animated.View
+          style={[
+            pickerStyles.container,
+            isDark ? pickerStyles.containerDark : null,
+            { transform: [{ translateY: slideAnim }] },
+          ]}
+        >
           <View style={pickerStyles.header}>
-            <Text style={pickerStyles.title}>Select Date</Text>
+            <Text style={[pickerStyles.title, isDark ? pickerStyles.titleDark : null]}>Select Date</Text>
             <TouchableOpacity onPress={onClose}>
-              <X size={20} color="#000" />
+              <X size={20} color={isDark ? "#E5E7EB" : "#000"} />
             </TouchableOpacity>
           </View>
           <View style={pickerStyles.monthRow}>
-            <TouchableOpacity style={pickerStyles.monthNavBtn} onPress={goToPreviousMonth}>
-              <ChevronLeft size={18} color="#111827" />
+            <TouchableOpacity style={[pickerStyles.monthNavBtn, isDark ? pickerStyles.monthNavBtnDark : null]} onPress={goToPreviousMonth}>
+              <ChevronLeft size={18} color={isDark ? "#E5E7EB" : "#111827"} />
             </TouchableOpacity>
-            <Text style={pickerStyles.monthLabel}>{calendarTitle}</Text>
-            <TouchableOpacity style={pickerStyles.monthNavBtn} onPress={goToNextMonth}>
-              <ChevronRight size={18} color="#111827" />
+            <Text style={[pickerStyles.monthLabel, isDark ? pickerStyles.monthLabelDark : null]}>{calendarTitle}</Text>
+            <TouchableOpacity style={[pickerStyles.monthNavBtn, isDark ? pickerStyles.monthNavBtnDark : null]} onPress={goToNextMonth}>
+              <ChevronRight size={18} color={isDark ? "#E5E7EB" : "#111827"} />
             </TouchableOpacity>
           </View>
 
           <View style={pickerStyles.weekHeaderRow}>
             {weekDays.map((weekday) => (
-              <Text key={weekday} style={pickerStyles.weekHeaderText}>
+              <Text key={weekday} style={[pickerStyles.weekHeaderText, isDark ? pickerStyles.weekHeaderTextDark : null]}>
                 {weekday}
               </Text>
             ))}
@@ -1364,11 +1574,12 @@ const SimpleDatePickerModal = ({ visible, currentDate, onClose, onSelect }: Date
                     ]}
                   >
                     <Text
-                      style={[
-                        pickerStyles.dayText,
-                        isSelected && pickerStyles.selectedDayText,
-                        !isSelected && isToday ? pickerStyles.todayDayText : null,
-                      ]}
+                    style={[
+                      pickerStyles.dayText,
+                      isDark ? pickerStyles.dayTextDark : null,
+                      isSelected && pickerStyles.selectedDayText,
+                      !isSelected && isToday ? pickerStyles.todayDayText : null,
+                    ]}
                     >
                       {cell.day}
                     </Text>
@@ -1378,8 +1589,8 @@ const SimpleDatePickerModal = ({ visible, currentDate, onClose, onSelect }: Date
             })}
           </View>
 
-          <TouchableOpacity style={pickerStyles.todayBtn} onPress={handleSelectToday}>
-            <Text style={pickerStyles.todayBtnText}>Today</Text>
+          <TouchableOpacity style={[pickerStyles.todayBtn, isDark ? pickerStyles.todayBtnDark : null]} onPress={handleSelectToday}>
+            <Text style={[pickerStyles.todayBtnText, isDark ? pickerStyles.todayBtnTextDark : null]}>Today</Text>
           </TouchableOpacity>
         </Animated.View>
       </Animated.View>
@@ -1398,6 +1609,7 @@ interface SelectionModalProps {
   onSelect: (value: string) => void;
 }
 const SelectionModal = ({ visible, title, options, selected, variant = "default", accentMap, onClose, onSelect }: SelectionModalProps) => {
+  const { isDark } = useAppTheme();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(300)).current;
   const [showModal, setShowModal] = useState(visible);
@@ -1445,16 +1657,24 @@ const SelectionModal = ({ visible, title, options, selected, variant = "default"
     <Modal visible={showModal} transparent animationType="none" onRequestClose={onClose}>
       <Animated.View style={[modalStyles.overlay, { opacity: fadeAnim }]}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
-        <Animated.View style={[selectionStyles.sheet, { transform: [{ translateY: slideAnim }] }]}>
-          <View style={selectionStyles.handle} />
+        <Animated.View style={[selectionStyles.sheet, isDark ? selectionStyles.sheetDark : null, { transform: [{ translateY: slideAnim }] }]}>
+          <View style={[selectionStyles.handle, isDark ? selectionStyles.handleDark : null]} />
           <View style={selectionStyles.header}>
-            <Text style={selectionStyles.title}>{title}</Text>
+            <Text style={[selectionStyles.title, isDark ? selectionStyles.titleDark : null]}>{title}</Text>
             <TouchableOpacity onPress={onClose}>
-              <X size={24} color="#000" />
+              <X size={24} color={isDark ? "#E5E7EB" : "#000"} />
             </TouchableOpacity>
           </View>
-          {isCategorySheet && <Text style={selectionStyles.subtitle}>Choose a category for this receipt</Text>}
-          {isCurrencySheet && <Text style={selectionStyles.subtitle}>Choose a currency for this receipt</Text>}
+          {isCategorySheet && (
+            <Text style={[selectionStyles.subtitle, isDark ? selectionStyles.subtitleDark : null]}>
+              Choose a category for this receipt
+            </Text>
+          )}
+          {isCurrencySheet && (
+            <Text style={[selectionStyles.subtitle, isDark ? selectionStyles.subtitleDark : null]}>
+              Choose a currency for this receipt
+            </Text>
+          )}
           <ScrollView>
             {isCategorySheet || isCurrencySheet ? (
               <View style={selectionStyles.categoryGrid}>
@@ -1467,7 +1687,11 @@ const SelectionModal = ({ visible, title, options, selected, variant = "default"
                   return (
                     <TouchableOpacity
                       key={opt}
-                      style={[selectionStyles.categoryChip, isSelected && selectionStyles.categoryChipSelected]}
+                      style={[
+                        selectionStyles.categoryChip,
+                        isDark ? selectionStyles.categoryChipDark : null,
+                        isSelected && selectionStyles.categoryChipSelected,
+                      ]}
                       onPress={() => onSelect(opt)}
                     >
                       <View style={[selectionStyles.categoryDot, { backgroundColor: accent }]} />
@@ -1475,18 +1699,21 @@ const SelectionModal = ({ visible, title, options, selected, variant = "default"
                         <Text
                           style={[
                             selectionStyles.categoryChipText,
+                            isDark ? selectionStyles.categoryChipTextDark : null,
                             isSelected && selectionStyles.categoryChipTextSelected,
                           ]}
                         >
                           {opt}
                         </Text>
                         {isCurrencySheet ? (
-                          <Text style={selectionStyles.categoryChipMeta}>{currencySymbols[opt] ?? opt}</Text>
+                          <Text style={[selectionStyles.categoryChipMeta, isDark ? selectionStyles.categoryChipMetaDark : null]}>
+                            {currencySymbols[opt] ?? opt}
+                          </Text>
                         ) : null}
                       </View>
                       {isSelected ? (
-                        <View style={selectionStyles.categoryCheckWrap}>
-                          <Check size={14} color="#111" strokeWidth={3} />
+                        <View style={[selectionStyles.categoryCheckWrap, isDark ? selectionStyles.categoryCheckWrapDark : null]}>
+                          <Check size={14} color={isDark ? "#E5E7EB" : "#111"} strokeWidth={3} />
                         </View>
                       ) : null}
                     </TouchableOpacity>
@@ -1497,10 +1724,16 @@ const SelectionModal = ({ visible, title, options, selected, variant = "default"
               options.map((opt: string) => (
                 <TouchableOpacity
                   key={opt}
-                  style={[selectionStyles.option, selected === opt && selectionStyles.selectedOption]}
+                  style={[selectionStyles.option, isDark ? selectionStyles.optionDark : null, selected === opt && selectionStyles.selectedOption]}
                   onPress={() => onSelect(opt)}
                 >
-                  <Text style={[selectionStyles.optionText, selected === opt && selectionStyles.selectedOptionText]}>
+                  <Text
+                    style={[
+                      selectionStyles.optionText,
+                      isDark ? selectionStyles.optionTextDark : null,
+                      selected === opt && selectionStyles.selectedOptionText,
+                    ]}
+                  >
                     {opt}
                   </Text>
                   {selected === opt && <Check size={20} color="#ffffff" />}
@@ -1517,8 +1750,8 @@ const SelectionModal = ({ visible, title, options, selected, variant = "default"
 // --- STYLES (Main list) ---
 const styles = StyleSheet.create({
   background: { flex: 1, backgroundColor: "#F8F9FA" },
+  backgroundDark: { backgroundColor: "#0B0F14" },
   headerContainer: {
-    paddingHorizontal: 20,
     paddingTop: 14,
     marginBottom: 14,
   },
@@ -1527,6 +1760,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 18,
+    paddingHorizontal: 20,
   },
   pageEyebrow: {
     fontSize: 12,
@@ -1541,6 +1775,9 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#111827",
     letterSpacing: -0.5,
+  },
+  pageTitleDark: {
+    color: "#F9FAFB",
   },
   headerBadge: {
     flexDirection: "row",
@@ -1557,6 +1794,10 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 1,
   },
+  headerBadgeDark: {
+    backgroundColor: "#111827",
+    borderColor: "#374151",
+  },
   headerBadgeDot: {
     width: 7,
     height: 7,
@@ -1569,7 +1810,12 @@ const styles = StyleSheet.create({
     color: "#111827",
     fontWeight: "700",
   },
+  headerBadgeTextDark: {
+    color: "#E5E7EB",
+  },
   summaryCard: {
+    width: "95%",
+    alignSelf: "center",
     backgroundColor: "#fff",
     borderRadius: 24,
     padding: 24,
@@ -1582,19 +1828,73 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 4,
   },
+  summaryCardDark: {
+    backgroundColor: "#111827",
+    borderWidth: 1,
+    borderColor: "#374151",
+  },
+  summaryMain: {
+    flex: 1,
+    minWidth: 0,
+    marginRight: 10,
+    marginLeft: -8,
+  },
   summaryLabel: { fontSize: 14, color: "#8E8E93", fontWeight: "600", marginBottom: 6 },
-  summaryAmount: { fontSize: 28, color: "#1A1A1A", fontWeight: "900" },
+  summaryLabelDark: { color: "#9CA3AF" },
+  summaryAmountRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  summaryAmountCurrency: {
+    fontSize: 28,
+    lineHeight: 34,
+    color: "#1A1A1A",
+    fontWeight: "900",
+    marginRight: 8,
+  },
+  summaryAmountViewport: {
+    position: "relative",
+    height: 38,
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  summaryAmountNumber: {
+    fontSize: 28,
+    lineHeight: 34,
+    color: "#1A1A1A",
+    fontWeight: "900",
+    textAlign: "left",
+    fontVariant: ["tabular-nums"],
+    textShadowColor: "rgba(26, 26, 26, 0.35)",
+    textShadowOffset: { width: 0, height: 0 },
+  },
+  summaryAmountTextDark: {
+    color: "#F9FAFB",
+    textShadowColor: "rgba(249, 250, 251, 0.35)",
+  },
+  summaryAmountSizer: {
+    opacity: 0,
+  },
+  summaryAmountAnimatedLayer: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+  },
   trendBadge: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#E6F9EA",
-    paddingHorizontal: 11,
-    paddingVertical: 6,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
     borderRadius: 100,
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.06)",
+    maxWidth: "52%",
+    flexShrink: 1,
+    marginTop: -8,
+    marginRight: -12,
   },
-  trendText: { color: "#34C759", fontWeight: "700", fontSize: 13, marginLeft: 4 },
+  trendText: { color: "#34C759", fontWeight: "700", fontSize: 13, marginLeft: 4, flexShrink: 1 },
   trendInfoOverlay: {
     flex: 1,
     backgroundColor: "rgba(3,7,18,0.48)",
@@ -1728,7 +2028,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#F0F0F0",
   },
+  searchBarDark: {
+    backgroundColor: "#111827",
+    borderColor: "#374151",
+  },
   searchInput: { flex: 1, marginLeft: 10, fontSize: 16, color: "#1A1A1A" },
+  searchInputDark: { color: "#F3F4F6" },
   filterScroll: { paddingRight: 20 },
   filterChip: {
     paddingHorizontal: 18,
@@ -1739,8 +2044,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E5E5EA",
   },
+  filterChipDark: {
+    backgroundColor: "#111827",
+    borderColor: "#374151",
+  },
   filterChipActive: { backgroundColor: "#1A1A1A", borderColor: "#1A1A1A" },
   filterText: { fontSize: 14, fontWeight: "600", color: "#1A1A1A" },
+  filterTextDark: { color: "#E5E7EB" },
   filterTextActive: { color: "#fff" },
 
   listContent: { paddingTop: 10, paddingBottom: 100 },
@@ -1766,6 +2076,10 @@ const cardStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#F2F2F7",
   },
+  cardDark: {
+    backgroundColor: "#111827",
+    borderColor: "#374151",
+  },
   iconContainer: {
     width: 48,
     height: 48,
@@ -1776,15 +2090,21 @@ const cardStyles = StyleSheet.create({
     marginRight: 16,
     overflow: "hidden",
   },
+  iconContainerDark: {
+    backgroundColor: "#1F2937",
+  },
   receiptImage: {
     width: "100%",
     height: "100%",
   },
   textColumn: { justifyContent: "center", gap: 4 },
   titleText: { fontSize: 16, fontWeight: "700", color: "#1A1A1A" },
+  titleTextDark: { color: "#F3F4F6" },
   metaText: { fontSize: 13, fontWeight: "500", color: "#8E8E93" },
+  metaTextDark: { color: "#9CA3AF" },
   rightColumn: { alignItems: "flex-end", gap: 6 },
   amount: { fontSize: 16, fontWeight: "800", color: "#1A1A1A" },
+  amountDark: { color: "#F9FAFB" },
   statusPill: { flexDirection: "row", alignItems: "center", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
   statusDot: { width: 6, height: 6, borderRadius: 3, marginRight: 6 },
   statusText: { fontSize: 11, fontWeight: "600" },
@@ -1806,8 +2126,14 @@ const pickerStyles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     shadowRadius: 16,
   },
+  containerDark: {
+    backgroundColor: "#111827",
+    borderWidth: 1,
+    borderColor: "#374151",
+  },
   header: { flexDirection: "row", justifyContent: "space-between", marginBottom: 14, alignItems: "center" },
   title: { fontSize: 18, fontWeight: "800", color: "#111827" },
+  titleDark: { color: "#F3F4F6" },
   monthRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1825,7 +2151,12 @@ const pickerStyles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#F9FAFB",
   },
+  monthNavBtnDark: {
+    borderColor: "#4B5563",
+    backgroundColor: "#1F2937",
+  },
   monthLabel: { fontSize: 17, color: "#111827", fontWeight: "800" },
+  monthLabelDark: { color: "#F3F4F6" },
   weekHeaderRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1839,6 +2170,9 @@ const pickerStyles = StyleSheet.create({
     fontWeight: "700",
     color: "#6B7280",
   },
+  weekHeaderTextDark: {
+    color: "#9CA3AF",
+  },
   grid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" },
   dayCell: { width: "14.2%", aspectRatio: 1, justifyContent: "center", alignItems: "center" },
   dayPill: { width: "84%", aspectRatio: 1, borderRadius: 999, justifyContent: "center", alignItems: "center" },
@@ -1849,6 +2183,7 @@ const pickerStyles = StyleSheet.create({
     backgroundColor: "#F9FAFB",
   },
   dayText: { fontSize: 15, color: "#333", fontWeight: "600" },
+  dayTextDark: { color: "#E5E7EB" },
   todayDayText: { color: "#111827", fontWeight: "800" },
   selectedDayText: { color: "#fff", fontWeight: "700" },
   todayBtn: {
@@ -1861,10 +2196,17 @@ const pickerStyles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
+  todayBtnDark: {
+    borderColor: "#4B5563",
+    backgroundColor: "#1F2937",
+  },
   todayBtnText: {
     fontSize: 13,
     fontWeight: "700",
     color: "#111827",
+  },
+  todayBtnTextDark: {
+    color: "#E5E7EB",
   },
 });
 
@@ -1885,6 +2227,9 @@ const selectionStyles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 14,
   },
+  sheetDark: {
+    backgroundColor: "#111827",
+  },
   handle: {
     alignSelf: "center",
     width: 46,
@@ -1893,9 +2238,14 @@ const selectionStyles = StyleSheet.create({
     backgroundColor: "#D4D4D8",
     marginBottom: 16,
   },
+  handleDark: {
+    backgroundColor: "#4B5563",
+  },
   header: { flexDirection: "row", justifyContent: "space-between", marginBottom: 6, alignItems: "center" },
   title: { fontSize: 20, fontWeight: "800", color: "#111" },
+  titleDark: { color: "#F3F4F6" },
   subtitle: { fontSize: 13, color: "#71717A", marginBottom: 16, fontWeight: "600" },
+  subtitleDark: { color: "#9CA3AF" },
   option: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1908,8 +2258,13 @@ const selectionStyles = StyleSheet.create({
     borderColor: "#F1F1F3",
     marginBottom: 10,
   },
+  optionDark: {
+    backgroundColor: "#1F2937",
+    borderColor: "#374151",
+  },
   selectedOption: { backgroundColor: "#000000", borderColor: "#000000" },
   optionText: { fontSize: 16, color: "#333", fontWeight: "600" },
+  optionTextDark: { color: "#E5E7EB" },
   selectedOptionText: { color: "#ffffff", fontWeight: "600" },
   categoryGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   categoryChip: {
@@ -1923,6 +2278,10 @@ const selectionStyles = StyleSheet.create({
     paddingVertical: 10,
     flexDirection: "row",
     alignItems: "center",
+  },
+  categoryChipDark: {
+    backgroundColor: "#1F2937",
+    borderColor: "#374151",
   },
   categoryChipSelected: {
     backgroundColor: "#EEF4FF",
@@ -1939,6 +2298,9 @@ const selectionStyles = StyleSheet.create({
     fontWeight: "700",
     color: "#1F2937",
   },
+  categoryChipTextDark: {
+    color: "#E5E7EB",
+  },
   categoryChipTextWrap: {
     flex: 1,
     justifyContent: "center",
@@ -1952,6 +2314,9 @@ const selectionStyles = StyleSheet.create({
     fontWeight: "700",
     color: "#6B7280",
   },
+  categoryChipMetaDark: {
+    color: "#9CA3AF",
+  },
   categoryCheckWrap: {
     width: 20,
     height: 20,
@@ -1961,6 +2326,10 @@ const selectionStyles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "#D4D4D8",
+  },
+  categoryCheckWrapDark: {
+    backgroundColor: "#111827",
+    borderColor: "#4B5563",
   },
 });
 
@@ -1972,17 +2341,24 @@ const modalStyles = StyleSheet.create({
 // --- NEW EDIT SHEET STYLES ---
 const editStyles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F2F2F7" },
+  containerDark: { backgroundColor: "#0B0F14" },
   dragHandleArea: {
     alignItems: "center",
     paddingTop: 10,
     paddingBottom: 8,
     backgroundColor: "#F7F7FA",
   },
+  dragHandleAreaDark: {
+    backgroundColor: "#111827",
+  },
   dragHandle: {
     width: 42,
     height: 5,
     borderRadius: 999,
     backgroundColor: "#D1D5DB",
+  },
+  dragHandleDark: {
+    backgroundColor: "#4B5563",
   },
 
   header: {
@@ -1996,6 +2372,10 @@ const editStyles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#E5E7EB",
   },
+  headerDark: {
+    backgroundColor: "#111827",
+    borderBottomColor: "#374151",
+  },
   headerIconBtn: {
     width: 36,
     height: 36,
@@ -2006,9 +2386,15 @@ const editStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E5E7EB",
   },
+  headerIconBtnDark: {
+    backgroundColor: "#1F2937",
+    borderColor: "#374151",
+  },
   headerTitleWrap: { alignItems: "center" },
   headerTitle: { color: "#111", fontSize: 18, fontWeight: "800", letterSpacing: 0.2 },
+  headerTitleDark: { color: "#F3F4F6" },
   headerSubtitle: { marginTop: 1, color: "#6B7280", fontSize: 12, fontWeight: "600" },
+  headerSubtitleDark: { color: "#9CA3AF" },
   headerGhostBtn: {
     width: 36,
     height: 36,
@@ -2019,6 +2405,9 @@ const editStyles = StyleSheet.create({
     paddingTop: 14,
     paddingBottom: 10,
     backgroundColor: "#F2F2F7",
+  },
+  stickySummaryWrapDark: {
+    backgroundColor: "#0B0F14",
   },
   summaryCard: {
     backgroundColor: "#fff",
@@ -2034,8 +2423,14 @@ const editStyles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 2,
   },
+  summaryCardDark: {
+    backgroundColor: "#111827",
+    borderColor: "#374151",
+  },
   summaryLabel: { fontSize: 12, color: "#8E8E93", fontWeight: "700" },
+  summaryLabelDark: { color: "#9CA3AF" },
   summaryAmount: { fontSize: 24, color: "#111", fontWeight: "900", marginTop: 2 },
+  summaryAmountDark: { color: "#F9FAFB" },
 
   pillsRow: { flexDirection: "row", alignItems: "center", marginTop: 10, gap: 10 },
   pill: {
@@ -2046,7 +2441,9 @@ const editStyles = StyleSheet.create({
     borderRadius: 999,
   },
   pillDark: { backgroundColor: "#111" },
+  pillLight: { backgroundColor: "#E5E7EB" },
   pillTextDark: { color: "#fff", fontWeight: "800", fontSize: 13 },
+  pillTextLight: { color: "#111827" },
 
   statusPill: { flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 8, borderRadius: 999 },
   statusDot: { width: 7, height: 7, borderRadius: 999, marginRight: 8 },
@@ -2062,6 +2459,10 @@ const editStyles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
+  },
+  receiptThumbDark: {
+    backgroundColor: "#1F2937",
+    borderColor: "#374151",
   },
   receiptImage: {
     width: "100%",
@@ -2167,6 +2568,7 @@ const editStyles = StyleSheet.create({
     fontWeight: "800",
   },
   receiptThumbText: { marginTop: 6, fontSize: 11, color: "#8E8E93", fontWeight: "700" },
+  receiptThumbTextDark: { color: "#9CA3AF" },
 
   content: { paddingHorizontal: 16, paddingBottom: 0 },
 
@@ -2183,7 +2585,12 @@ const editStyles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 1,
   },
+  sectionCardDark: {
+    backgroundColor: "#111827",
+    borderColor: "#374151",
+  },
   sectionTitle: { fontSize: 13, color: "#8E8E93", fontWeight: "800", marginBottom: 10, letterSpacing: 0.2 },
+  sectionTitleDark: { color: "#9CA3AF" },
 
   inputWrap: {
     backgroundColor: "#F7F7FA",
@@ -2194,7 +2601,12 @@ const editStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#EFEFF4",
   },
+  inputWrapDark: {
+    backgroundColor: "#1F2937",
+    borderColor: "#374151",
+  },
   input: { fontSize: 16, color: "#111", fontWeight: "600" },
+  inputDark: { color: "#F3F4F6" },
 
   row: { flexDirection: "row", gap: 12 },
   half: { flex: 1 },
@@ -2211,11 +2623,18 @@ const editStyles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  dateValueIconDark: {
+    backgroundColor: "#1F2937",
+    borderColor: "#374151",
+  },
   datePrimary: { fontSize: 17, color: "#111", fontWeight: "900", letterSpacing: 0.2 },
+  datePrimaryDark: { color: "#F3F4F6" },
   dateSecondary: { marginTop: 1, fontSize: 11, color: "#6B7280", fontWeight: "700" },
+  dateSecondaryDark: { color: "#9CA3AF" },
   categoryValueWrap: { flexDirection: "row", alignItems: "center", gap: 8 },
   categoryColorDot: { width: 10, height: 10, borderRadius: 999 },
   valueText: { fontSize: 16, color: "#111", fontWeight: "800" },
+  valueTextDark: { color: "#F3F4F6" },
   statusInfoOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.45)",
@@ -2233,6 +2652,10 @@ const editStyles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 14,
   },
+  statusInfoCardDark: {
+    backgroundColor: "#111827",
+    borderColor: "#374151",
+  },
   statusInfoHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -2244,6 +2667,7 @@ const editStyles = StyleSheet.create({
     color: "#111827",
     fontWeight: "800",
   },
+  statusInfoTitleDark: { color: "#F3F4F6" },
   statusInfoRow: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -2260,7 +2684,9 @@ const editStyles = StyleSheet.create({
   },
   statusInfoTextWrap: { flex: 1 },
   statusInfoLabel: { fontSize: 14, color: "#111827", fontWeight: "800" },
+  statusInfoLabelDark: { color: "#F3F4F6" },
   statusInfoText: { marginTop: 2, fontSize: 12, lineHeight: 18, color: "#4B5563", fontWeight: "600" },
+  statusInfoTextDark: { color: "#9CA3AF" },
   statusInfoHint: {
     marginTop: 6,
     textAlign: "center",
@@ -2268,6 +2694,7 @@ const editStyles = StyleSheet.create({
     color: "#6B7280",
     fontWeight: "700",
   },
+  statusInfoHintDark: { color: "#9CA3AF" },
 
   toggleRow: {
     flexDirection: "row",
@@ -2278,6 +2705,10 @@ const editStyles = StyleSheet.create({
     borderColor: "#EFEFF4",
     backgroundColor: "#F7F7FA",
     gap: 10,
+  },
+  toggleRowDark: {
+    borderColor: "#374151",
+    backgroundColor: "#1F2937",
   },
   toggleRowActive: { backgroundColor: "#F5F3FF", borderColor: "#111" },
   checkBox: {
@@ -2292,7 +2723,9 @@ const editStyles = StyleSheet.create({
   },
   checkBoxActive: { backgroundColor: "#7E57FF", borderColor: "#7E57FF" },
   toggleTitle: { fontSize: 14, fontWeight: "900", color: "#111" },
+  toggleTitleDark: { color: "#F3F4F6" },
   toggleSubtitle: { marginTop: 2, fontSize: 12, fontWeight: "700", color: "#8E8E93" },
+  toggleSubtitleDark: { color: "#9CA3AF" },
 
   bottomBar: {
     position: "absolute",
@@ -2305,6 +2738,10 @@ const editStyles = StyleSheet.create({
     backgroundColor: "rgba(242,242,247,0.92)",
     borderTopWidth: 1,
     borderTopColor: "#E5E5EA",
+  },
+  bottomBarDark: {
+    backgroundColor: "rgba(17,24,39,0.92)",
+    borderTopColor: "#374151",
   },
   saveBtn: {
     height: 52,

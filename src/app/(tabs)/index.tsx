@@ -1,9 +1,10 @@
 import { AppDrawer, useAppDrawer } from "@/src/components/homepage/AppDrawer";
-import { ExpenseGrid, type ExpenseItem } from "@/src/components/homepage/ExpenseGrid";
+import { ExpenseGrid, type ExpenseItem, type HomeLayoutStyle } from "@/src/components/homepage/ExpenseGrid";
 import { TopBar } from "@/src/components/homepage/TopBar";
 import { SafeArea } from "@/src/components/SafeArea";
 import { useGuardedModalPush } from "@/src/hooks/guardForModals";
-import { clearBudgetForCategory } from "@/src/stores/budgetStore";
+import { useAppTheme } from "@/src/providers/AppThemeProvider";
+import { clearBudgetForCategory, useBudgetStore } from "@/src/stores/budgetStore";
 import {
   Inter_400Regular,
   Inter_500Medium,
@@ -165,6 +166,7 @@ const PREFERENCES_UPSERT_SQL = `
     updated_at = excluded.updated_at;
 `;
 const HOME_CATEGORY_ORDER_KEY_PREFIX = "home_category_order";
+const HOME_LAYOUT_STYLE_KEY = "home_layout_style_v1";
 
 const normalizeToken = (value: string | null | undefined): string =>
   (value ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -173,6 +175,7 @@ const arraysEqual = (a: string[], b: string[]): boolean =>
 
 const resolveHomeIcon = (rawIcon: string | null | undefined, categoryName: string | null | undefined): LucideIcon => {
   const normalizedCategory = normalizeToken(categoryName);
+  
 
   if (normalizedCategory === "groceries") return ShoppingCart;
   if (normalizedCategory === "transport") return Car;
@@ -235,23 +238,47 @@ const withAlpha = (hex: string, alpha: number): string => {
 };
 
 function HomeContent() {
+  const { isDark } = useAppTheme();
   const drawer = useAppDrawer();
   const { pushModal } = useGuardedModalPush();
   const insets = useSafeAreaInsets();
 
   const dbExpo = useSQLiteContext();
   const db = drizzle(dbExpo);
+  const { budgetOverrides } = useBudgetStore();
   const [isAddCategoryVisible, setAddCategoryVisible] = useState(false);
   const [isCreatingCategory, setIsCreatingCategory] = useState(false);
   const [selectedCategoryPreset, setSelectedCategoryPreset] = useState<string | null>(null);
   const [selectedCategoryColor, setSelectedCategoryColor] = useState(CATEGORY_COLOR_OPTIONS[0]);
   const [categoryOrderIds, setCategoryOrderIds] = useState<string[] | null>(null);
+  const [homeLayoutStyle, setHomeLayoutStyle] = useState<HomeLayoutStyle>("grid");
   const [isCategoryEditing, setIsCategoryEditing] = useState(false);
   const shakeValue = useRef(new Animated.Value(0)).current;
-  const currentMonth = useMemo(
+  const latestAvailableMonth = useMemo(
     () => new Date(new Date().getFullYear(), new Date().getMonth(), 1),
     [],
   );
+  const [currentMonth, setCurrentMonth] = useState<Date>(latestAvailableMonth);
+  const previousMonth = useMemo(
+    () => new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1),
+    [currentMonth],
+  );
+  const currentMonthTitle = useMemo(() => {
+    const monthLabel = currentMonth.toLocaleString("en-US", { month: "long" });
+    const isCurrentYear = currentMonth.getFullYear() === new Date().getFullYear();
+    return isCurrentYear
+      ? `Your ${monthLabel} Spending.`
+      : `Your ${monthLabel} ${currentMonth.getFullYear()} Spending.`;
+  }, [currentMonth]);
+  const handlePreviousMonth = useCallback(() => {
+    setCurrentMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+  }, []);
+  const handleNextMonth = useCallback(() => {
+    setCurrentMonth((prev) => {
+      const next = new Date(prev.getFullYear(), prev.getMonth() + 1, 1);
+      return next.getTime() > latestAvailableMonth.getTime() ? prev : next;
+    });
+  }, [latestAvailableMonth]);
   const categoryOrderKey = useMemo(
     () => `${HOME_CATEGORY_ORDER_KEY_PREFIX}_${currentMonth.getTime()}`,
     [currentMonth],
@@ -299,24 +326,51 @@ function HomeContent() {
     () => categoriesForMonth(db, currentMonth),
     [db, currentMonth],
   );
+  const previousMonthCategoriesQuery = useMemo(
+    () => categoriesForMonth(db, previousMonth),
+    [db, previousMonth],
+  );
   const paymentsQuery = useMemo(
     () => paymentSumsByCategory(db),
     [db],
   );
 
   const { data: categoriesData } = useLiveQuery(categoriesQuery);
+  const { data: previousMonthCategoriesData } = useLiveQuery(previousMonthCategoriesQuery);
   const { data: paymentSumsData } = useLiveQuery(paymentsQuery);
   const paymentSumsByCategoryId = useMemo(
     () => new Map(paymentSumsData.map((row) => [row.categoryId, Number(row.totalSumCents)])),
     [paymentSumsData],
   );
+  const previousMonthSpendingByCategoryToken = useMemo(() => {
+    const spendingByToken = new Map<string, number>();
+
+    previousMonthCategoriesData.forEach((item) => {
+      const token = normalizeToken(item.categoryName);
+      if (!token) return;
+
+      const spendCents = paymentSumsByCategoryId.get(item.id) ?? 0;
+      spendingByToken.set(token, (spendingByToken.get(token) ?? 0) + spendCents);
+    });
+
+    return spendingByToken;
+  }, [paymentSumsByCategoryId, previousMonthCategoriesData]);
   const expenseItems = useMemo<ExpenseItem[]>(
     () =>
       categoriesData.map((item) => {
         const circleColor = item.color;
         const icon = resolveHomeIcon(item.icon, item.categoryName);
         const categoryTotalCents = paymentSumsByCategoryId.get(item.id) ?? 0;
+        const categoryTotal = Number((categoryTotalCents / 100).toFixed(2));
         const categoryTotalNoDecimals = Math.round(categoryTotalCents / 100);
+        const previousMonthSpendCents =
+          previousMonthSpendingByCategoryToken.get(normalizeToken(item.categoryName)) ?? 0;
+        const trendPercent =
+          previousMonthSpendCents > 0
+            ? ((categoryTotalCents - previousMonthSpendCents) / previousMonthSpendCents) * 100
+            : null;
+        const budget = budgetOverrides[String(item.id)] ?? 0;
+        const budgetUsageRatio = budget > 0 ? categoryTotal / budget : null;
 
         return {
           id: String(item.id),
@@ -326,10 +380,12 @@ function HomeContent() {
           circleColor,
           backgroundColor: withAlpha(circleColor, 0.4),
           icon,
+          budgetUsageRatio,
+          trendPercent,
           kind: "category",
         };
       }),
-    [categoriesData, paymentSumsByCategoryId],
+    [budgetOverrides, categoriesData, paymentSumsByCategoryId, previousMonthSpendingByCategoryToken],
   );
   const persistCategoryOrder = useCallback(
     async (nextOrderIds: string[]) => {
@@ -392,6 +448,37 @@ function HomeContent() {
   }, [categoryOrderKey, dbExpo]);
 
   useEffect(() => {
+    let isMounted = true;
+
+    const loadHomeLayoutStyle = async () => {
+      try {
+        await dbExpo.runAsync(PREFERENCES_TABLE_SQL);
+        const row = await dbExpo.getFirstAsync<{ value: string }>(
+          "SELECT value FROM app_preferences WHERE key = ? LIMIT 1",
+          [HOME_LAYOUT_STYLE_KEY],
+        );
+
+        if (!isMounted) return;
+        if (row?.value === "grid" || row?.value === "masonry") {
+          setHomeLayoutStyle(row.value);
+          return;
+        }
+        setHomeLayoutStyle("grid");
+      } catch (error) {
+        console.error("Failed to load home layout style", error);
+        if (isMounted) {
+          setHomeLayoutStyle("grid");
+        }
+      }
+    };
+
+    void loadHomeLayoutStyle();
+    return () => {
+      isMounted = false;
+    };
+  }, [dbExpo]);
+
+  useEffect(() => {
     if (categoryOrderIds === null) {
       return;
     }
@@ -424,7 +511,7 @@ function HomeContent() {
       ...orderedExpenseItems,
       {
         id: "add-category-card",
-        name: "Add Category",
+        name: "New Budget",
         kind: "add",
       },
     ],
@@ -590,10 +677,10 @@ function HomeContent() {
   return (
     <>
       <TopBar
-        title="This Month"
+        title={currentMonthTitle}
         onMenuPress={drawer.open}
-        onPrevPress={() => {}}
-        onNextPress={() => {}}
+        onPrevPress={handlePreviousMonth}
+        onNextPress={handleNextMonth}
       />
       <View style={styles.contentDismissArea}>
         {isCategoryEditing ? (
@@ -605,6 +692,7 @@ function HomeContent() {
           </Text>
           <ExpenseGrid
             items={gridItems}
+            layoutStyle={homeLayoutStyle}
             onPressItem={handleOpenAddExpense}
             onLongPressItem={handleLongPressCategory}
             onDeleteItem={handleDeleteCategory}
@@ -617,14 +705,22 @@ function HomeContent() {
       </View>
       <Modal visible={isAddCategoryVisible} transparent animationType="fade" onRequestClose={closeAddCategoryModal}>
         <Pressable style={styles.categoryModalOverlay} onPress={closeAddCategoryModal}>
-          <Pressable style={styles.categoryModalSheet} onPress={(event) => event.stopPropagation()}>
-            <View style={styles.categoryModalHeader}>
+          <Pressable
+            style={[styles.categoryModalSheet, isDark ? styles.categoryModalSheetDark : null]}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <View style={[styles.categoryModalHeader, isDark ? styles.categoryModalHeaderDark : null]}>
               <View style={styles.categoryModalHeaderText}>
-                <Text style={styles.categoryModalTitle}>New Category</Text>
-                <Text style={styles.categoryModalSubtitle}>Choose a category and a color</Text>
+                <Text style={[styles.categoryModalTitle, isDark ? styles.categoryModalTitleDark : null]}>New Category</Text>
+                <Text style={[styles.categoryModalSubtitle, isDark ? styles.categoryModalSubtitleDark : null]}>
+                  Choose a category and a color
+                </Text>
               </View>
-              <Pressable style={styles.categoryModalCloseButton} onPress={closeAddCategoryModal}>
-                <X size={18} color="#111827" />
+              <Pressable
+                style={[styles.categoryModalCloseButton, isDark ? styles.categoryModalCloseButtonDark : null]}
+                onPress={closeAddCategoryModal}
+              >
+                <X size={18} color={isDark ? "#F3F4F6" : "#111827"} />
               </Pressable>
             </View>
 
@@ -636,7 +732,7 @@ function HomeContent() {
               ]}
               showsVerticalScrollIndicator={false}
             >
-              <Text style={styles.modalSectionLabel}>Pick a category</Text>
+              <Text style={[styles.modalSectionLabel, isDark ? styles.modalSectionLabelDark : null]}>Pick a category</Text>
               <View style={styles.presetGrid}>
                 {PREDEFINED_CATEGORY_OPTIONS.map((option) => {
                   const isSelected = selectedCategoryPreset === option.name;
@@ -647,6 +743,7 @@ function HomeContent() {
                       key={option.name}
                       style={[
                         styles.presetChip,
+                        isDark ? styles.presetChipDark : null,
                         isSelected ? styles.presetChipActive : null,
                         isTaken ? styles.presetChipDisabled : null,
                       ]}
@@ -656,17 +753,19 @@ function HomeContent() {
                       <View
                         style={[
                           styles.presetChipIconWrap,
+                          isDark ? styles.presetChipIconWrapDark : null,
                           isSelected ? styles.presetChipIconWrapActive : null,
                         ]}
                       >
                         <IconComponent
                           size={14}
-                          color={isTaken ? "#9CA3AF" : isSelected ? "#FFFFFF" : "#111827"}
+                          color={isTaken ? "#9CA3AF" : isSelected ? "#FFFFFF" : isDark ? "#E5E7EB" : "#111827"}
                         />
                       </View>
                       <Text
                         style={[
                           styles.presetChipText,
+                          isDark ? styles.presetChipTextDark : null,
                           isSelected ? styles.presetChipTextActive : null,
                           isTaken ? styles.presetChipTextDisabled : null,
                         ]}
@@ -678,10 +777,12 @@ function HomeContent() {
                 })}
               </View>
               {availablePresetCount === 0 ? (
-                <Text style={styles.presetUnavailableText}>All predefined categories are already added.</Text>
+                <Text style={[styles.presetUnavailableText, isDark ? styles.presetUnavailableTextDark : null]}>
+                  All predefined categories are already added.
+                </Text>
               ) : null}
 
-              <Text style={styles.modalSectionLabel}>Pick a color</Text>
+              <Text style={[styles.modalSectionLabel, isDark ? styles.modalSectionLabelDark : null]}>Pick a color</Text>
               <View style={styles.colorPalette}>
                 {CATEGORY_COLOR_OPTIONS.map((color) => {
                   const isSelected = selectedCategoryColor === color;
@@ -690,6 +791,7 @@ function HomeContent() {
                       key={color}
                       style={[
                         styles.colorSwatchOuter,
+                        isDark ? styles.colorSwatchOuterDark : null,
                         isSelected ? styles.colorSwatchOuterActive : null,
                       ]}
                       onPress={() => setSelectedCategoryColor(color)}
@@ -700,21 +802,31 @@ function HomeContent() {
                 })}
               </View>
 
-              <Text style={styles.modalSectionLabel}>Preview</Text>
-              <View style={styles.previewCard}>
+              <Text style={[styles.modalSectionLabel, isDark ? styles.modalSectionLabelDark : null]}>Preview</Text>
+              <View style={[styles.previewCard, isDark ? styles.previewCardDark : null]}>
                 <View style={[styles.previewIconWrap, { backgroundColor: selectedCategoryColor }]}>
                   <SelectedPresetIcon size={16} color="#FFFFFF" />
                 </View>
                 <View style={styles.previewCopy}>
-                  <Text style={styles.previewName}>{selectedCategoryPreset ?? "Select a category"}</Text>
-                  <Text style={styles.previewHint}>This will be added for the current month</Text>
+                  <Text style={[styles.previewName, isDark ? styles.previewNameDark : null]}>
+                    {selectedCategoryPreset ?? "Select a category"}
+                  </Text>
+                  <Text style={[styles.previewHint, isDark ? styles.previewHintDark : null]}>
+                    This will be added for the current month
+                  </Text>
                 </View>
               </View>
             </ScrollView>
 
-            <View style={[styles.categoryModalActions, { paddingBottom: Math.max(18, insets.bottom + 10) }]}>
-              <Pressable style={styles.modalGhostButton} onPress={closeAddCategoryModal}>
-                <Text style={styles.modalGhostText}>Cancel</Text>
+            <View
+              style={[
+                styles.categoryModalActions,
+                isDark ? styles.categoryModalActionsDark : null,
+                { paddingBottom: Math.max(18, insets.bottom + 10) },
+              ]}
+            >
+              <Pressable style={[styles.modalGhostButton, isDark ? styles.modalGhostButtonDark : null]} onPress={closeAddCategoryModal}>
+                <Text style={[styles.modalGhostText, isDark ? styles.modalGhostTextDark : null]}>Cancel</Text>
               </Pressable>
               <Pressable
                 style={[
@@ -724,7 +836,7 @@ function HomeContent() {
                 onPress={handleCreateCategory}
                 disabled={isCreatingCategory || !selectedCategoryPreset}
               >
-                <Text style={styles.modalPrimaryText}>{isCreatingCategory ? "Adding..." : "Add Category"}</Text>
+                <Text style={styles.modalPrimaryText}>{isCreatingCategory ? "Adding..." : "New Budget"}</Text>
               </Pressable>
             </View>
           </Pressable>
@@ -742,6 +854,7 @@ export function AppText(props: any) {
 }
 
 export default function HomeScreen() {
+  const { appColors } = useAppTheme();
 
   const [fontsLoaded] = useFonts({
     Inter_400Regular,
@@ -751,14 +864,14 @@ export default function HomeScreen() {
   })
   if (!fontsLoaded) {
     return (
-      <View style={styles.fontLoading}>
+      <View style={[styles.fontLoading, { backgroundColor: appColors.background }]}>
         <ActivityIndicator size="large" />
       </View>
     );
   }
 
   return (
-    <View style={styles.background}>
+    <View style={[styles.background, { backgroundColor: appColors.background }]}>
       <SafeArea>
         <AppDrawer>
           <HomeContent />
@@ -805,6 +918,10 @@ const styles = StyleSheet.create({
     borderColor: "#E5E7EB",
     overflow: "hidden",
   },
+  categoryModalSheetDark: {
+    backgroundColor: "#111827",
+    borderColor: "#374151",
+  },
   categoryModalHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -815,6 +932,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#F1F5F9",
   },
+  categoryModalHeaderDark: {
+    borderBottomColor: "#374151",
+  },
   categoryModalHeaderText: {
     flex: 1,
     paddingRight: 12,
@@ -824,11 +944,17 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#111827",
   },
+  categoryModalTitleDark: {
+    color: "#F9FAFB",
+  },
   categoryModalSubtitle: {
     marginTop: 3,
     fontSize: 12,
     fontWeight: "600",
     color: "#6B7280",
+  },
+  categoryModalSubtitleDark: {
+    color: "#9CA3AF",
   },
   categoryModalCloseButton: {
     width: 34,
@@ -837,6 +963,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#F3F4F6",
     alignItems: "center",
     justifyContent: "center",
+  },
+  categoryModalCloseButtonDark: {
+    backgroundColor: "#1F2937",
   },
   categoryModalScroll: {
     flex: 1,
@@ -852,6 +981,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     color: "#111827",
+  },
+  modalSectionLabelDark: {
+    color: "#F3F4F6",
   },
   presetGrid: {
     flexDirection: "row",
@@ -870,6 +1002,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
+  presetChipDark: {
+    borderColor: "#374151",
+    backgroundColor: "#1F2937",
+  },
   presetChipActive: {
     borderColor: "#111827",
     backgroundColor: "#111827",
@@ -885,6 +1021,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  presetChipIconWrapDark: {
+    backgroundColor: "#111827",
+  },
   presetChipIconWrapActive: {
     backgroundColor: "rgba(255,255,255,0.18)",
   },
@@ -892,6 +1031,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
     color: "#374151",
+  },
+  presetChipTextDark: {
+    color: "#E5E7EB",
   },
   presetChipTextActive: {
     color: "#FFFFFF",
@@ -904,6 +1046,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
     color: "#6B7280",
+  },
+  presetUnavailableTextDark: {
+    color: "#9CA3AF",
   },
   colorPalette: {
     flexDirection: "row",
@@ -919,6 +1064,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#FFFFFF",
+  },
+  colorSwatchOuterDark: {
+    borderColor: "#4B5563",
+    backgroundColor: "#111827",
   },
   colorSwatchOuterActive: {
     borderColor: "#111827",
@@ -939,6 +1088,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
   },
+  previewCardDark: {
+    borderColor: "#374151",
+    backgroundColor: "#1F2937",
+  },
   previewIconWrap: {
     width: 34,
     height: 34,
@@ -955,11 +1108,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
   },
+  previewNameDark: {
+    color: "#F9FAFB",
+  },
   previewHint: {
     marginTop: 2,
     color: "#6B7280",
     fontSize: 12,
     fontWeight: "500",
+  },
+  previewHintDark: {
+    color: "#9CA3AF",
   },
   categoryModalActions: {
     borderTopWidth: 1,
@@ -969,6 +1128,9 @@ const styles = StyleSheet.create({
     paddingBottom: 18,
     flexDirection: "row",
     gap: 8,
+  },
+  categoryModalActionsDark: {
+    borderTopColor: "#374151",
   },
   modalGhostButton: {
     flex: 1,
@@ -980,10 +1142,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  modalGhostButtonDark: {
+    borderColor: "#4B5563",
+    backgroundColor: "#111827",
+  },
   modalGhostText: {
     color: "#374151",
     fontSize: 14,
     fontWeight: "700",
+  },
+  modalGhostTextDark: {
+    color: "#E5E7EB",
   },
   modalPrimaryButton: {
     flex: 1,

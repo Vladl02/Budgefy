@@ -17,6 +17,7 @@ import { useSQLiteContext } from "expo-sqlite";
 import { CurrencySheet } from "../../components/CurrencySheet";
 import { TagSearchModal } from "../../components/TagSearchModal";
 import { useRecommendationStore } from "../../providers/RecommendationStoreProvider";
+import { useAppTheme } from "../../providers/AppThemeProvider";
 import {
   createRecommendationKey,
   DEFAULT_SHOP_OPTIONS,
@@ -171,6 +172,7 @@ function ProgressBar({
 }
 
 export default function AddExpense() {
+  const { isDark } = useAppTheme();
   const { cacheVersion } = useRecommendationStore();
   const { category, categoryUserId, categoryId } = useLocalSearchParams<{
     category?: string;
@@ -790,38 +792,38 @@ export default function AddExpense() {
   return (
     <View style={styles.root}>
       <Pressable style={styles.backdropPressable} onPress={handleClose}>
-        <Animated.View style={[styles.backdrop, backdropStyle]} />
+        <Animated.View style={[styles.backdrop, isDark ? styles.backdropDark : null, backdropStyle]} />
       </Pressable>
 
       <GestureDetector gesture={panGesture}>
-        <Animated.View style={[styles.sheet, { height: sheetHeight }, sheetStyle]}>
-          <View style={styles.handleIndicator} />
-          <View style={styles.topSection}>
-            <View style={styles.header}>
-              <Pressable onPress={handleClose} style={styles.closeButton}>
-                <Text style={styles.closeIcon}>X</Text>
+        <Animated.View style={[styles.sheet, isDark ? styles.sheetDark : null, { height: sheetHeight }, sheetStyle]}>
+          <View style={[styles.handleIndicator, isDark ? styles.handleIndicatorDark : null]} />
+          <View style={[styles.topSection, isDark ? styles.topSectionDark : null]}>
+            <View style={[styles.header, isDark ? styles.headerDark : null]}>
+              <Pressable onPress={handleClose} style={[styles.closeButton, isDark ? styles.closeButtonDark : null]}>
+                <Text style={[styles.closeIcon, isDark ? styles.closeIconDark : null]}>X</Text>
               </Pressable>
-              <Text style={styles.headerTitle}>{title}</Text>
+              <Text style={[styles.headerTitle, isDark ? styles.headerTitleDark : null]}>{title}</Text>
               <View style={styles.headerSpacer} />
             </View>
 
             <View style={styles.formArea}>
-              <View style={styles.amountBox}>
-                <Text style={styles.amountText}>RON {displayValue}</Text>
+              <View style={[styles.amountBox, isDark ? styles.amountBoxDark : null]}>
+                <Text style={[styles.amountText, isDark ? styles.amountTextDark : null]}>RON {displayValue}</Text>
               </View>
-              <View style={styles.productBox}>
+              <View style={[styles.productBox, isDark ? styles.productBoxDark : null]}>
                 <TextInput
                   value={productName}
                   onChangeText={setProductName}
                   placeholder="Product Name"
-                  placeholderTextColor="#777777"
-                  style={styles.productInput}
+                  placeholderTextColor={isDark ? "#9CA3AF" : "#777777"}
+                  style={[styles.productInput, isDark ? styles.productInputDark : null]}
                 />
               </View>
             </View>
           </View>
 
-          <View style={[styles.bottomSection, { paddingBottom: 20 + insets.bottom }]}>
+          <View style={[styles.bottomSection, isDark ? styles.bottomSectionDark : null, { paddingBottom: 20 + insets.bottom }]}>
             <ProgressBar
               spent={20}
               total={200}
@@ -838,16 +840,17 @@ export default function AddExpense() {
               contentContainerStyle={styles.tagsRowContent}
             >
               <Pressable
-                style={[styles.tag, styles.tagMuted]}
+                style={[styles.tag, isDark ? styles.tagDark : null, styles.tagMuted, isDark ? styles.tagMutedDark : null]}
                 onPress={() => setActivePicker("subcategory")}
               >
-                <Text style={styles.tagText}>+</Text>
+                <Text style={[styles.tagText, isDark ? styles.tagTextDark : null]}>+</Text>
               </Pressable>
               {visibleSubcategories.map((label, index) => (
                 <Pressable
                   key={`${label}-${index}`}
                   style={[
                     styles.tag,
+                    isDark ? styles.tagDark : null,
                     selectedSubcategory === label ? styles.tagSelected : null,
                   ]}
                   onPress={() => handleSelectSubcategory(label)}
@@ -855,6 +858,7 @@ export default function AddExpense() {
                   <Text
                     style={[
                       styles.tagText,
+                      isDark ? styles.tagTextDark : null,
                       selectedSubcategory === label ? styles.tagTextSelected : null,
                     ]}
                   >
@@ -864,7 +868,7 @@ export default function AddExpense() {
               ))}
             </ScrollView>
 
-            <View style={styles.tagsDivider} />
+            <View style={[styles.tagsDivider, isDark ? styles.tagsDividerDark : null]} />
 
             <ScrollView
               horizontal
@@ -873,16 +877,17 @@ export default function AddExpense() {
               contentContainerStyle={styles.tagsRowContent}
             >
               <Pressable
-                style={[styles.tag, styles.tagMuted]}
+                style={[styles.tag, isDark ? styles.tagDark : null, styles.tagMuted, isDark ? styles.tagMutedDark : null]}
                 onPress={() => setActivePicker("shop")}
               >
-                <Text style={styles.tagText}>+</Text>
+                <Text style={[styles.tagText, isDark ? styles.tagTextDark : null]}>+</Text>
               </Pressable>
               {visibleShopNames.map((label, index) => (
                 <Pressable
                   key={`${label}-${index}`}
                   style={[
                     styles.tag,
+                    isDark ? styles.tagDark : null,
                     selectedShopName === label ? styles.tagSelected : null,
                   ]}
                   onPress={() => handleSelectShop(label)}
@@ -890,6 +895,7 @@ export default function AddExpense() {
                   <Text
                     style={[
                       styles.tagText,
+                      isDark ? styles.tagTextDark : null,
                       selectedShopName === label ? styles.tagTextSelected : null,
                     ]}
                   >
@@ -899,7 +905,7 @@ export default function AddExpense() {
               ))}
             </ScrollView>
 
-            <View style={styles.keypad}>
+            <View style={[styles.keypad, isDark ? styles.keypadDark : null]}>
               {KEYPAD_KEYS.map((key) => {
                 const isCurrencyKey = key === "CURRENCY";
                 const isConfirmKey = key === ">";
@@ -910,11 +916,11 @@ export default function AddExpense() {
                   return (
                     <Pressable
                       key={key}
-                      style={[styles.key, styles.keyDouble]}
+                      style={[styles.key, isDark ? styles.keyDark : null, styles.keyDouble]}
                       onPress={() => handleKeyPress(key)}
                     >
-                      <Text style={styles.keyText}>{currency}</Text>
-                      <Text style={styles.keySubText}>Currency</Text>
+                      <Text style={[styles.keyText, isDark ? styles.keyTextDark : null]}>{currency}</Text>
+                      <Text style={[styles.keySubText, isDark ? styles.keySubTextDark : null]}>Currency</Text>
                     </Pressable>
                   );
                 }
@@ -926,6 +932,7 @@ export default function AddExpense() {
                     disabled={isConfirmDisabled}
                     style={[
                       styles.key,
+                      isDark ? styles.keyDark : null,
                       isConfirmKey ? styles.keyAccent : null,
                       isConfirmDisabled ? styles.keyDisabled : null,
                     ]}
@@ -937,9 +944,9 @@ export default function AddExpense() {
                         <Equal size={18} color={styles.keyTextAccent.color} />
                       )
                     ) : key === "X" ? (
-                      <Delete size={18} color={styles.keyText.color} />
+                      <Delete size={18} color={isDark ? "#F3F4F6" : "#1F1F1F"} />
                     ) : (
-                      <Text style={[styles.keyText, isConfirmKey ? styles.keyTextAccent : null]}>
+                      <Text style={[styles.keyText, isDark ? styles.keyTextDark : null, isConfirmKey ? styles.keyTextAccent : null]}>
                         {displayLabel}
                       </Text>
                     )}
@@ -990,11 +997,17 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "#000000",
   },
+  backdropDark: {
+    backgroundColor: "#000000",
+  },
   sheet: {
     backgroundColor: "#FFFFFF",
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
     overflow: "hidden",
+  },
+  sheetDark: {
+    backgroundColor: "#0B0F14",
   },
   handleIndicator: {
     alignSelf: "center",
@@ -1004,11 +1017,17 @@ const styles = StyleSheet.create({
     backgroundColor: "#2B2B2B",
     marginTop: 8,
   },
+  handleIndicatorDark: {
+    backgroundColor: "#4B5563",
+  },
   topSection: {
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 6,
     flexGrow: 1,
+  },
+  topSectionDark: {
+    backgroundColor: "#0B0F14",
   },
   header: {
     flexDirection: "row",
@@ -1016,21 +1035,34 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingBottom: 6,
   },
+  headerDark: {
+    backgroundColor: "#0B0F14",
+  },
   closeButton: {
     width: 32,
     height: 32,
     alignItems: "center",
     justifyContent: "center",
   },
+  closeButtonDark: {
+    borderRadius: 10,
+    backgroundColor: "#1F2937",
+  },
   closeIcon: {
     fontSize: 18,
     fontWeight: "700",
     color: "#1F1F1F",
   },
+  closeIconDark: {
+    color: "#F3F4F6",
+  },
   headerTitle: {
     fontSize: 16,
     fontWeight: "700",
     color: "#1F1F1F",
+  },
+  headerTitleDark: {
+    color: "#F3F4F6",
   },
   headerSpacer: {
     width: 32,
@@ -1049,10 +1081,18 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: "center",
   },
+  amountBoxDark: {
+    backgroundColor: "#1F2937",
+    borderWidth: 1,
+    borderColor: "#374151",
+  },
   amountText: {
     fontSize: 26,
     fontWeight: "600",
     color: "#1F1F1F",
+  },
+  amountTextDark: {
+    color: "#F9FAFB",
   },
   productBox: {
     width: "78%",
@@ -1061,16 +1101,27 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     alignItems: "center",
   },
+  productBoxDark: {
+    backgroundColor: "#1F2937",
+    borderWidth: 1,
+    borderColor: "#374151",
+  },
   productInput: {
     width: "100%",
     textAlign: "center",
     fontSize: 14,
     color: "#555555",
   },
+  productInputDark: {
+    color: "#E5E7EB",
+  },
   bottomSection: {
     marginTop: "auto",
     backgroundColor: "#ffffffff",
     paddingBottom: 16,
+  },
+  bottomSectionDark: {
+    backgroundColor: "#0B0F14",
   },
   progressBar: {
     backgroundColor: "#F1D6D6",
@@ -1118,6 +1169,9 @@ const styles = StyleSheet.create({
     marginHorizontal: 0,
     opacity: 0.9,
   },
+  tagsDividerDark: {
+    backgroundColor: "#374151",
+  },
   tag: {
     backgroundColor: "#E8E8E8",
     borderRadius: 16,
@@ -1127,11 +1181,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  tagDark: {
+    backgroundColor: "#1F2937",
+  },
   tagMuted: {
     borderWidth: 1,
     borderStyle: "dashed",
     borderColor: "#B8B8B8",
     backgroundColor: "transparent",
+  },
+  tagMutedDark: {
+    borderColor: "#4B5563",
   },
   tagSelected: {
     backgroundColor: "#5F6F2A",
@@ -1140,6 +1200,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#6D6D6D",
     textAlign: "center",
+  },
+  tagTextDark: {
+    color: "#D1D5DB",
   },
   tagTextSelected: {
     color: "#FFFFFF",
@@ -1154,6 +1217,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingTop: 8,
   },
+  keypadDark: {
+    backgroundColor: "#0B0F14",
+  },
   key: {
     width: "23%",
     backgroundColor: "#F5F5F5",
@@ -1163,6 +1229,11 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     marginBottom: 8,
   },
+  keyDark: {
+    backgroundColor: "#1F2937",
+    borderWidth: 1,
+    borderColor: "#2F3A4A",
+  },
   keyDouble: {
     paddingVertical: 6,
   },
@@ -1171,9 +1242,15 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#1F1F1F",
   },
+  keyTextDark: {
+    color: "#F3F4F6",
+  },
   keySubText: {
     fontSize: 11,
     color: "#666666",
+  },
+  keySubTextDark: {
+    color: "#9CA3AF",
   },
   keyAccent: {
     backgroundColor: "#5F6F2A",
@@ -1186,4 +1263,3 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 });
-

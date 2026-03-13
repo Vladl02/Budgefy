@@ -1,11 +1,11 @@
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { Text } from "@react-navigation/elements";
-import { useTheme } from "@react-navigation/native";
 import { ChartPie, House, ScanLine, Scroll, Settings } from "lucide-react-native";
 import { Alert, InteractionManager, Pressable, StyleSheet, View } from "react-native";
 import { useCallback, useRef } from "react";
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSQLiteContext } from "expo-sqlite";
+import { useAppTheme } from "@/src/providers/AppThemeProvider";
 import {
   analyzeReceiptWithSupabase,
   saveScannedReceiptsAsSpending,
@@ -22,7 +22,7 @@ const ICONS_BY_ROUTE = {
 
 
 export function MyTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
-  const { colors } = useTheme();
+  const { isDark, appColors } = useAppTheme();
   const db = useSQLiteContext();
   const scanLockRef = useRef(false);
   
@@ -37,6 +37,13 @@ export function MyTabBar({ state, descriptors, navigation }: BottomTabBarProps) 
 
       if (scanResult.status === "unavailable_web") {
         Alert.alert("Unavailable on web", "Document scanning works on Android/iOS dev builds.");
+        return;
+      }
+      if (scanResult.status === "unavailable_native") {
+        Alert.alert(
+          "Scanner unavailable",
+          "This build does not include the native scanner module. Rebuild the app (expo run:ios/android or EAS build).",
+        );
         return;
       }
 
@@ -69,7 +76,7 @@ export function MyTabBar({ state, descriptors, navigation }: BottomTabBarProps) 
   }, [db]);
 
   return (
-    <View style={[styles.tabbar, { backgroundColor: colors.card, bottom:  insets.bottom+10}]}>
+    <View style={[styles.tabbar, { backgroundColor: appColors.tabBar, borderColor: appColors.tabBarBorder, bottom: insets.bottom + 10 }]}>
       {state.routes.map((route, index) => {
         const { options } = descriptors[route.key];
         const label =
@@ -83,8 +90,8 @@ export function MyTabBar({ state, descriptors, navigation }: BottomTabBarProps) 
         const isCenter = route.name === "scan";
         const isCenterActive = isCenter ? true : isFocused;
         const Icon = ICONS_BY_ROUTE[route.name as keyof typeof ICONS_BY_ROUTE];
-        const iconColor = isCenter || isFocused ? "#ffffffff" : "#000000ff";
-        const labelColor = isCenter || isFocused ? "#ffffffff" : "#000000ff";
+        const iconColor = isCenter || isFocused ? appColors.tabActiveText : appColors.tabInactiveText;
+        const labelColor = isCenter || isFocused ? appColors.tabActiveText : appColors.tabInactiveText;
         
         const labelNode =
           typeof label === "function"
@@ -141,6 +148,13 @@ export function MyTabBar({ state, descriptors, navigation }: BottomTabBarProps) 
                 isCenter && styles.iconBubbleCenter,
                 !isCenter && isFocused && styles.iconBubbleActive,
                 isCenterActive && isCenter && styles.iconBubbleCenterActive,
+                !isCenter && isFocused ? { backgroundColor: appColors.tabActivePill } : null,
+                isCenter
+                  ? {
+                      backgroundColor: appColors.tabActivePill,
+                      borderColor: isDark ? "#4B5563" : "#D1D5DB",
+                    }
+                  : null,
                 pressed && styles.iconBubblePressed,
               ]}
             >
@@ -209,6 +223,8 @@ const styles = StyleSheet.create({
     opacity: 0.85,
   },
   iconBubbleActive: {
+    width: 70,
+    height: 55,
     backgroundColor: "#1F1F1F",
     borderRadius: 30,
   },
@@ -216,12 +232,14 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: "#efdcc6ff",
+    backgroundColor: "#EFDCC6",
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
     overflow: "hidden",
   },
   iconBubbleCenterActive: {
     backgroundColor: "#000000ff",
-    borderRadius: 32,
+    borderRadius: 28,
   },
   label: {
     marginTop: 4,

@@ -1,6 +1,7 @@
 import React from "react";
 import { StyleSheet, View, ViewProps } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useAppTheme } from "@/src/providers/AppThemeProvider";
 
 type SafeAreaProps = ViewProps & {
   children: React.ReactNode;
@@ -10,6 +11,7 @@ type SafeAreaProps = ViewProps & {
 
 export function SafeArea({ children, style, top, bottom, ...rest }: SafeAreaProps) {
   const insets = useSafeAreaInsets();
+  const { appColors } = useAppTheme();
   const hasEdgeOverride = top !== undefined || bottom !== undefined;
 
   return (
@@ -21,6 +23,7 @@ export function SafeArea({ children, style, top, bottom, ...rest }: SafeAreaProp
           paddingBottom: hasEdgeOverride ? (bottom ? insets.bottom : 0) : insets.bottom,
           paddingLeft: insets.left,
           paddingRight: insets.right,
+          backgroundColor: appColors.background,
         },
         style,
       ]}

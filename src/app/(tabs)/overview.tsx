@@ -14,6 +14,7 @@ import CategoryCard, {
 import MonthlySummaryCard from "@/src/components/overview/donutCard";
 import EditBudgetModal, { SummaryItem } from "@/src/components/overview/EditBudgetModal";
 import { SafeArea } from "@/src/components/SafeArea";
+import { useAppTheme } from "@/src/providers/AppThemeProvider";
 import { useBudgetStore } from "@/src/stores/budgetStore";
 
 type SortMode = "budget" | "spent" | "alphabetical";
@@ -25,6 +26,7 @@ const SORT_OPTIONS: { key: SortMode; label: string }[] = [
 ];
 
 export default function Overview() {
+  const { isDark } = useAppTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { budgetOverrides, setAllBudgets, setCategoryBudget, clearCategoryBudget } = useBudgetStore();
@@ -116,18 +118,6 @@ export default function Overview() {
     });
   };
 
-  const totalSpent = useMemo(() => items.reduce((sum, item) => sum + item.spent, 0), [items]);
-  const totalBudget = useMemo(() => items.reduce((sum, item) => sum + item.budget, 0), [items]);
-  const remainingBudget = Math.max(totalBudget - totalSpent, 0);
-  const spendRatio = totalBudget > 0 ? Math.min(totalSpent / totalBudget, 1) : 0;
-  const thisMonthLabel = useMemo(
-    () => new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" }),
-    [],
-  );
-  const topSpendingCategory = useMemo(() => {
-    if (items.length === 0) return null;
-    return [...items].sort((a, b) => b.spent - a.spent)[0];
-  }, [items]);
   const listBottomPadding = useMemo(() => insets.bottom + 92, [insets.bottom]);
   const sortedItems = useMemo(() => {
     const next = [...items];
@@ -141,7 +131,7 @@ export default function Overview() {
   }, [items, sortMode]);
 
   return (
-    <SafeArea style={styles.safeArea}>
+    <SafeArea style={[styles.safeArea, isDark ? styles.safeAreaDark : null]}>
       <FlatList
         data={sortedItems}
         keyExtractor={(item) => item.id}
@@ -165,51 +155,15 @@ export default function Overview() {
         ItemSeparatorComponent={() => <View style={{ height: 4 }} />}
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <Text style={styles.emptyStateTitle}>No categories for this month</Text>
-            <Text style={styles.emptyStateSubtitle}>Add categories from Home to populate Overview.</Text>
+            <Text style={[styles.emptyStateTitle, isDark ? styles.emptyStateTitleDark : null]}>No categories for this month</Text>
+            <Text style={[styles.emptyStateSubtitle, isDark ? styles.emptyStateSubtitleDark : null]}>
+              Add categories from Home to populate Overview.
+            </Text>
           </View>
         }
         // Render Header (Summary + Donut)
         ListHeaderComponent={
           <View style={styles.header}>
-            <View style={styles.heroCard}>
-              <View style={styles.heroTopRow}>
-                <View>
-                  <Text style={styles.heroEyebrow}>Overview</Text>
-                  <Text style={styles.heroTitle}>Budget Snapshot</Text>
-                  <Text style={styles.heroSubtitle}>Track your monthly budget performance</Text>
-                </View>
-                <View style={styles.monthPill}>
-                  <Text style={styles.monthPillText}>{thisMonthLabel}</Text>
-                </View>
-              </View>
-
-              <View style={styles.metricRow}>
-                <View style={styles.metricCard}>
-                  <Text style={styles.metricLabel}>Spent</Text>
-                  <Text style={styles.metricValue}>${totalSpent.toFixed(2)}</Text>
-                </View>
-                <View style={styles.metricCard}>
-                  <Text style={styles.metricLabel}>Remaining</Text>
-                  <Text style={styles.metricValue}>${remainingBudget.toFixed(2)}</Text>
-                </View>
-              </View>
-
-              <View style={styles.progressWrap}>
-                <View style={styles.progressTrack}>
-                  <View style={[styles.progressFill, { width: `${spendRatio * 100}%` }]} />
-                </View>
-                <Text style={styles.progressText}>{Math.round(spendRatio * 100)}% of monthly budget used</Text>
-              </View>
-
-              <View style={styles.topCategoryRow}>
-                <Text style={styles.topCategoryLabel}>Top category</Text>
-                <Text style={styles.topCategoryValue}>
-                  {topSpendingCategory ? `${topSpendingCategory.title} · $${topSpendingCategory.spent.toFixed(2)}` : "No data"}
-                </Text>
-              </View>
-            </View>
-
             <MonthlySummaryCard
               items={items}
               daysInPeriod={31}
@@ -218,8 +172,10 @@ export default function Overview() {
             />
 
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Categories</Text>
-              <Text style={styles.sectionSubtitle}>Detailed allocation by budget bucket</Text>
+              <Text style={[styles.sectionTitle, isDark ? styles.sectionTitleDark : null]}>Categories</Text>
+              <Text style={[styles.sectionSubtitle, isDark ? styles.sectionSubtitleDark : null]}>
+                Detailed allocation by budget bucket
+              </Text>
               <View style={styles.sortRow}>
                 {SORT_OPTIONS.map((option) => {
                   const isActive = sortMode === option.key;
@@ -228,12 +184,19 @@ export default function Overview() {
                       key={option.key}
                       style={({ pressed }) => [
                         styles.sortChip,
+                        isDark ? styles.sortChipDark : null,
                         isActive ? styles.sortChipActive : null,
                         pressed ? styles.sortChipPressed : null,
                       ]}
                       onPress={() => setSortMode(option.key)}
                     >
-                      <Text style={[styles.sortChipText, isActive ? styles.sortChipTextActive : null]}>
+                      <Text
+                        style={[
+                          styles.sortChipText,
+                          isDark ? styles.sortChipTextDark : null,
+                          isActive ? styles.sortChipTextActive : null,
+                        ]}
+                      >
                         {option.label}
                       </Text>
                     </Pressable>
@@ -254,14 +217,16 @@ export default function Overview() {
 
       <Modal visible={!!quickBudgetTarget} transparent animationType="fade" onRequestClose={closeQuickBudget}>
         <Pressable style={styles.quickBudgetOverlay} onPress={closeQuickBudget}>
-          <View style={styles.quickBudgetCard} onStartShouldSetResponder={() => true}>
-            <Text style={styles.quickBudgetTitle}>Set Budget</Text>
-            <Text style={styles.quickBudgetSubtitle}>{quickBudgetTarget?.title ?? "Category"}</Text>
+          <View style={[styles.quickBudgetCard, isDark ? styles.quickBudgetCardDark : null]} onStartShouldSetResponder={() => true}>
+            <Text style={[styles.quickBudgetTitle, isDark ? styles.quickBudgetTitleDark : null]}>Set Budget</Text>
+            <Text style={[styles.quickBudgetSubtitle, isDark ? styles.quickBudgetSubtitleDark : null]}>
+              {quickBudgetTarget?.title ?? "Category"}
+            </Text>
 
-            <View style={styles.quickBudgetInputWrap}>
-              <Text style={styles.quickBudgetCurrency}>$</Text>
+            <View style={[styles.quickBudgetInputWrap, isDark ? styles.quickBudgetInputWrapDark : null]}>
+              <Text style={[styles.quickBudgetCurrency, isDark ? styles.quickBudgetCurrencyDark : null]}>$</Text>
               <TextInput
-                style={styles.quickBudgetInput}
+                style={[styles.quickBudgetInput, isDark ? styles.quickBudgetInputDark : null]}
                 value={quickBudgetInput}
                 onChangeText={setQuickBudgetInput}
                 keyboardType="decimal-pad"
@@ -272,8 +237,8 @@ export default function Overview() {
             </View>
 
             <View style={styles.quickBudgetActions}>
-              <TouchableOpacity style={styles.quickBudgetGhostBtn} onPress={closeQuickBudget}>
-                <Text style={styles.quickBudgetGhostText}>Cancel</Text>
+              <TouchableOpacity style={[styles.quickBudgetGhostBtn, isDark ? styles.quickBudgetGhostBtnDark : null]} onPress={closeQuickBudget}>
+                <Text style={[styles.quickBudgetGhostText, isDark ? styles.quickBudgetGhostTextDark : null]}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.quickBudgetPrimaryBtn} onPress={saveQuickBudget}>
                 <Text style={styles.quickBudgetPrimaryText}>Save</Text>
@@ -296,6 +261,9 @@ const styles = StyleSheet.create({
   safeArea: {
     backgroundColor: "#F6F7FB",
   },
+  safeAreaDark: {
+    backgroundColor: "#0B0F14",
+  },
   content: {
     paddingTop: 12,
     paddingBottom: 28,
@@ -317,6 +285,10 @@ const styles = StyleSheet.create({
     shadowRadius: 14,
     elevation: 4,
   },
+  heroCardDark: {
+    backgroundColor: "#111827",
+    borderColor: "#374151",
+  },
   heroTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -330,6 +302,9 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 0.6,
   },
+  heroEyebrowDark: {
+    color: "#9CA3AF",
+  },
   heroTitle: {
     marginTop: 2,
     fontSize: 24,
@@ -337,11 +312,17 @@ const styles = StyleSheet.create({
     color: "#111827",
     letterSpacing: -0.4,
   },
+  heroTitleDark: {
+    color: "#F9FAFB",
+  },
   heroSubtitle: {
     marginTop: 2,
     fontSize: 12,
     fontWeight: "500",
     color: "#6B7280",
+  },
+  heroSubtitleDark: {
+    color: "#9CA3AF",
   },
   monthPill: {
     backgroundColor: "#111827",
@@ -368,16 +349,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 10,
   },
+  metricCardDark: {
+    backgroundColor: "#1F2937",
+    borderColor: "#374151",
+  },
   metricLabel: {
     fontSize: 11,
     color: "#6B7280",
     fontWeight: "600",
+  },
+  metricLabelDark: {
+    color: "#9CA3AF",
   },
   metricValue: {
     marginTop: 4,
     fontSize: 18,
     color: "#111827",
     fontWeight: "800",
+  },
+  metricValueDark: {
+    color: "#F9FAFB",
   },
   progressWrap: {
     marginTop: 12,
@@ -399,6 +390,9 @@ const styles = StyleSheet.create({
     color: "#4B5563",
     fontWeight: "600",
   },
+  progressTextDark: {
+    color: "#9CA3AF",
+  },
   topCategoryRow: {
     marginTop: 10,
     paddingTop: 10,
@@ -409,15 +403,24 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
+  topCategoryRowDark: {
+    borderTopColor: "#374151",
+  },
   topCategoryLabel: {
     fontSize: 12,
     color: "#6B7280",
     fontWeight: "600",
   },
+  topCategoryLabelDark: {
+    color: "#9CA3AF",
+  },
   topCategoryValue: {
     fontSize: 13,
     color: "#111827",
     fontWeight: "700",
+  },
+  topCategoryValueDark: {
+    color: "#F9FAFB",
   },
   sectionHeader: {
     marginTop: 4,
@@ -428,11 +431,17 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#111827",
   },
+  sectionTitleDark: {
+    color: "#F3F4F6",
+  },
   sectionSubtitle: {
     marginTop: 2,
     fontSize: 12,
     color: "#6B7280",
     fontWeight: "500",
+  },
+  sectionSubtitleDark: {
+    color: "#9CA3AF",
   },
   sortRow: {
     marginTop: 10,
@@ -448,6 +457,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 7,
   },
+  sortChipDark: {
+    borderColor: "#374151",
+    backgroundColor: "#111827",
+  },
   sortChipActive: {
     backgroundColor: "#111827",
     borderColor: "#111827",
@@ -460,6 +473,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     color: "#374151",
+  },
+  sortChipTextDark: {
+    color: "#D1D5DB",
   },
   sortChipTextActive: {
     color: "#FFFFFF",
@@ -476,12 +492,18 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#111827",
   },
+  emptyStateTitleDark: {
+    color: "#F3F4F6",
+  },
   emptyStateSubtitle: {
     marginTop: 6,
     fontSize: 12,
     fontWeight: "500",
     color: "#6B7280",
     textAlign: "center",
+  },
+  emptyStateSubtitleDark: {
+    color: "#9CA3AF",
   },
   quickBudgetOverlay: {
     flex: 1,
@@ -497,16 +519,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 14,
   },
+  quickBudgetCardDark: {
+    backgroundColor: "#111827",
+    borderColor: "#374151",
+  },
   quickBudgetTitle: {
     fontSize: 16,
     fontWeight: "800",
     color: "#111827",
+  },
+  quickBudgetTitleDark: {
+    color: "#F9FAFB",
   },
   quickBudgetSubtitle: {
     marginTop: 2,
     fontSize: 12,
     fontWeight: "600",
     color: "#6B7280",
+  },
+  quickBudgetSubtitleDark: {
+    color: "#9CA3AF",
   },
   quickBudgetInputWrap: {
     marginTop: 12,
@@ -519,17 +551,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 10,
   },
+  quickBudgetInputWrapDark: {
+    borderColor: "#4B5563",
+    backgroundColor: "#1F2937",
+  },
   quickBudgetCurrency: {
     fontSize: 18,
     fontWeight: "800",
     color: "#111827",
     marginRight: 6,
   },
+  quickBudgetCurrencyDark: {
+    color: "#F9FAFB",
+  },
   quickBudgetInput: {
     flex: 1,
     fontSize: 18,
     fontWeight: "700",
     color: "#111827",
+  },
+  quickBudgetInputDark: {
+    color: "#F9FAFB",
   },
   quickBudgetActions: {
     marginTop: 12,
@@ -546,10 +588,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  quickBudgetGhostBtnDark: {
+    borderColor: "#4B5563",
+    backgroundColor: "#111827",
+  },
   quickBudgetGhostText: {
     color: "#374151",
     fontSize: 14,
     fontWeight: "700",
+  },
+  quickBudgetGhostTextDark: {
+    color: "#E5E7EB",
   },
   quickBudgetPrimaryBtn: {
     flex: 1,
