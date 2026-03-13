@@ -1625,6 +1625,15 @@ const styles = StyleSheet.create({
   groupRowDividerDark: {
     backgroundColor: "#1A1A1A",
   },
+  deleteAction: {
+    width: 72,
+    marginVertical: 6,
+    marginRight: 10,
+    borderRadius: 16,
+    backgroundColor: "#EF4444",
+    alignItems: "center",
+    justifyContent: "center",
+  },
 
   listContent: { paddingTop: 4, paddingBottom: 100 },
   emptyStateWrap: {

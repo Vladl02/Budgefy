@@ -1,8 +1,22 @@
+import { CurrencySheet } from "@/src/components/CurrencySheet";
+import { TagSearchModal } from "@/src/components/TagSearchModal";
+import { ProgressBar } from "@/src/components/addExpense/ProgressBar";
+import { useRecommendationStore } from "@/src/providers/RecommendationStoreProvider";
+import {
+  createRecommendationKey,
+  DEFAULT_SHOP_OPTIONS,
+  DEFAULT_SUBCATEGORY_OPTIONS,
+  getCachedCategoryColor,
+  getCachedRecommendationNames,
+  normalizeRecommendationName,
+  setCachedRecommendationNames,
+} from "@/src/utils/recommendations";
 import { useNavigation } from "@react-navigation/native";
 import { router, useLocalSearchParams } from "expo-router";
+import { useSQLiteContext } from "expo-sqlite";
 import { Check, Delete, Equal } from "lucide-react-native";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, BackHandler, Dimensions, InteractionManager, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, BackHandler, Dimensions, InteractionManager, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   Easing,
@@ -13,20 +27,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { scheduleOnRN } from "react-native-worklets";
-import { useSQLiteContext } from "expo-sqlite";
-import { CurrencySheet } from "@/src/components/CurrencySheet";
-import { TagSearchModal } from "@/src/components/TagSearchModal";
-import { ProgressBar } from "@/src/components/addExpense/ProgressBar";
-import { useAppTheme } from "@/src/providers/AppThemeProvider";
-import { useRecommendationStore } from "@/src/providers/RecommendationStoreProvider";
-import {
-  createRecommendationKey,
-  DEFAULT_SHOP_OPTIONS,
-  DEFAULT_SUBCATEGORY_OPTIONS,
-  getCachedCategoryColor,
-  getCachedRecommendationNames,
-  normalizeRecommendationName,
-} from "@/src/utils/recommendations";
+import { useAppTheme } from "../../providers/AppThemeProvider";
 
 type CalcOperator = "add" | "subtract" | "multiply" | "divide";
 const KEYPAD_KEYS = [
@@ -168,6 +169,7 @@ export default function AddExpense() {
   const [subcategoryOptions, setSubcategoryOptions] = useState<string[]>([]);
   const [shopOptions, setShopOptions] = useState<string[]>([]);
   const [activePicker, setActivePicker] = useState<"subcategory" | "shop" | null>(null);
+  const [isSavingExpense, setIsSavingExpense] = useState(false);
   const isSavingExpenseRef = useRef(false);
 
   const sheetHeight = Dimensions.get("screen").height * 0.9;
@@ -543,6 +545,36 @@ export default function AddExpense() {
     );
   };
 
+  const addSubcategoryToStateAndCache = (value: string) => {
+    const trimmed = value.trim().replace(/\s+/g, " ");
+    if (!trimmed) return;
+
+    setSubcategoryOptions((prev) => {
+      const exists = findCaseInsensitiveMatch(prev, trimmed);
+      if (exists) return prev;
+      const next = [trimmed, ...prev];
+      if (recommendationContextKey) {
+        setCachedRecommendationNames("subcategory", recommendationContextKey, next);
+      }
+      return next;
+    });
+  };
+
+  const addShopToStateAndCache = (value: string) => {
+    const trimmed = value.trim().replace(/\s+/g, " ");
+    if (!trimmed) return;
+
+    setShopOptions((prev) => {
+      const exists = findCaseInsensitiveMatch(prev, trimmed);
+      if (exists) return prev;
+      const next = [trimmed, ...prev];
+      if (recommendationContextKey) {
+        setCachedRecommendationNames("shop", recommendationContextKey, next);
+      }
+      return next;
+    });
+  };
+
   const handleSelectSubcategory = (value: string) => {
     setSelectedSubcategory(value);
     if (
@@ -616,6 +648,9 @@ export default function AddExpense() {
     const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
 
     isSavingExpenseRef.current = true;
+    setIsSavingExpense(true);
+    setPendingNewSubcategory(null);
+    setPendingNewShopName(null);
     handleClose();
 
     InteractionManager.runAfterInteractions(() => {
@@ -636,7 +671,6 @@ export default function AddExpense() {
 
           if (!resolvedCategoryId) {
             console.error("Cannot save expense: category id could not be resolved");
-            Alert.alert("Could not save", "Category not found. Please reopen the modal.");
             return;
           }
 
@@ -668,20 +702,30 @@ export default function AddExpense() {
           );
 
           if (selectedSubcategorySnapshot || selectedShopNameSnapshot) {
-            await Promise.all([
-              selectedSubcategorySnapshot
-                ? upsertSubcategoryPreset(selectedSubcategorySnapshot, true)
-                : Promise.resolve(),
-              selectedShopNameSnapshot
-                ? upsertShopPreset(selectedShopNameSnapshot, true)
-                : Promise.resolve(),
-            ]);
+            try {
+              await Promise.all([
+                selectedSubcategorySnapshot
+                  ? upsertSubcategoryPreset(selectedSubcategorySnapshot, true)
+                  : Promise.resolve(),
+                selectedShopNameSnapshot
+                  ? upsertShopPreset(selectedShopNameSnapshot, true)
+                  : Promise.resolve(),
+              ]);
+              if (selectedSubcategorySnapshot) {
+                addSubcategoryToStateAndCache(selectedSubcategorySnapshot);
+              }
+              if (selectedShopNameSnapshot) {
+                addShopToStateAndCache(selectedShopNameSnapshot);
+              }
+            } catch (presetError) {
+              console.error("Failed to update recommendation presets:", presetError);
+            }
           }
         } catch (error) {
           console.error("Failed to save expense:", error);
-          Alert.alert("Could not save", "Database write failed. Check logs and try again.");
         } finally {
           isSavingExpenseRef.current = false;
+          setIsSavingExpense(false);
         }
       })();
     });
@@ -833,7 +877,7 @@ export default function AddExpense() {
               {KEYPAD_KEYS.map((key) => {
                 const isCurrencyKey = key === "CURRENCY";
                 const isConfirmKey = key === ">";
-                const isConfirmDisabled = false;
+                const isConfirmDisabled = isConfirmKey && isSavingExpense;
                 const displayLabel = key === "*/%" ? "x/" : key;
 
                 if (isCurrencyKey) {
@@ -862,7 +906,9 @@ export default function AddExpense() {
                     ]}
                   >
                     {isConfirmKey ? (
-                      readyCalcState ? (
+                      isSavingExpense ? (
+                        <ActivityIndicator size="small" color={styles.keyTextAccent.color} />
+                      ) : readyCalcState ? (
                         <Check size={18} color={styles.keyTextAccent.color} />
                       ) : (
                         <Equal size={18} color={styles.keyTextAccent.color} />
@@ -1046,6 +1092,37 @@ const styles = StyleSheet.create({
   },
   bottomSectionDark: {
     backgroundColor: "#0B0F14",
+  },
+  progressBar: {
+    backgroundColor: "#F1D6D6",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    overflow: "hidden",
+  },
+  progressFill: {
+    backgroundColor: "#F6B3B3",
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+  },
+  progressContent: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  progressLeft: {
+    alignItems: "flex-start",
+  },
+  progressRight: {
+    alignItems: "flex-end",
+  },
+  progressAmount: {
+    color: "#D63A3A",
+    fontWeight: "700",
+  },
+  progressLabel: {
+    color: "#D63A3A",
+    fontSize: 12,
   },
   tagsRow: {
     marginTop: 4,
