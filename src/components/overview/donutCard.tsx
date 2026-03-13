@@ -1,9 +1,8 @@
 import React, { useMemo, useRef, useState } from "react";
 import { View, Text, StyleSheet, Pressable, LayoutAnimation, Platform, UIManager, Animated, useWindowDimensions } from "react-native";
-import Svg, { G, Path } from "react-native-svg";
-import * as d3 from "d3-shape";
 import { Minimize2, Maximize2, Pencil } from "lucide-react-native";
 import { CATEGORY_STYLES, IconKey } from "@/src/components/overview/category";
+import { DonutChart } from "@/src/components/overview/donutCard/components/DonutChart";
 
 // Enable LayoutAnimation on Android
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -13,7 +12,7 @@ if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental
 export type SummaryItem = {
   id: string;
   title: string;
-  spent?: number;
+  spent: number;
   budget: number;
   icon: IconKey; 
   color?: string; // 1. Added optional color prop
@@ -132,7 +131,7 @@ export default function MonthlySummaryCard({
 
       <View style={[styles.summaryRow, isCompactLayout ? styles.summaryRowCompact : null]}>
         <View style={[styles.donutShell, isCompactLayout ? styles.donutShellCompact : null]}>
-          <Donut size={isCompactLayout ? 104 : 116} strokeWidth={isCompactLayout ? 12 : 14} data={data} />
+          <DonutChart size={isCompactLayout ? 104 : 116} strokeWidth={isCompactLayout ? 12 : 14} data={data} />
           <View style={[styles.donutCenter, isCompactLayout ? styles.donutCenterCompact : null]}>
             <Text style={styles.donutCenterLabel}>Total</Text>
             <Text style={styles.donutCenterValue}>${formatMoney(total)}</Text>
@@ -213,46 +212,6 @@ export default function MonthlySummaryCard({
         </View>
       )}
     </View>
-  );
-}
-
-/* ---------------- Donut ---------------- */
-
-function Donut({
-  size,
-  strokeWidth,
-  data,
-}: {
-  size: number;
-  strokeWidth: number;
-  data: { value: number; color: string }[];
-}) {
-  const radius = size / 2;
-  const innerRadius = radius - strokeWidth;
-
-  const arcs = useMemo(() => {
-    const pie = d3.pie<{ value: number; color: string }>().value((d) => d.value).sort(null);
-    return pie(data);
-  }, [data]);
-
-  const arcGen = useMemo(
-    () =>
-      d3
-        .arc<d3.PieArcDatum<{ value: number; color: string }>>()
-        .outerRadius(radius)
-        .innerRadius(innerRadius)
-        .padAngle(data.length > 1 ? 0.02 : 0),
-    [data.length, innerRadius, radius]
-  );
-
-  return (
-    <Svg width={size} height={size}>
-      <G x={radius} y={radius}>
-        {arcs.map((a, idx) => (
-          <Path key={idx} d={arcGen(a) || ""} fill={a.data.color} />
-        ))}
-      </G>
-    </Svg>
   );
 }
 

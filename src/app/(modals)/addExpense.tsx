@@ -2,7 +2,7 @@ import { useNavigation } from "@react-navigation/native";
 import { router, useLocalSearchParams } from "expo-router";
 import { Check, Delete, Equal } from "lucide-react-native";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, BackHandler, Dimensions, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, BackHandler, Dimensions, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   Easing,
@@ -14,9 +14,10 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { scheduleOnRN } from "react-native-worklets";
 import { useSQLiteContext } from "expo-sqlite";
-import { CurrencySheet } from "../../components/CurrencySheet";
-import { TagSearchModal } from "../../components/TagSearchModal";
-import { useRecommendationStore } from "../../providers/RecommendationStoreProvider";
+import { CurrencySheet } from "@/src/components/CurrencySheet";
+import { TagSearchModal } from "@/src/components/TagSearchModal";
+import { ProgressBar } from "@/src/components/addExpense/ProgressBar";
+import { useRecommendationStore } from "@/src/providers/RecommendationStoreProvider";
 import {
   createRecommendationKey,
   DEFAULT_SHOP_OPTIONS,
@@ -25,16 +26,7 @@ import {
   getCachedRecommendationNames,
   normalizeRecommendationName,
   setCachedRecommendationNames,
-} from "../../utils/recommendations";
-
-type ProgressBarProps = {
-  spent: number;
-  total: number;
-  trackColor?: string;
-  fillColor?: string;
-  labelColor?: string;
-  leftLabelColor?: string;
-};
+} from "@/src/utils/recommendations";
 
 type CalcOperator = "add" | "subtract" | "multiply" | "divide";
 const KEYPAD_KEYS = [
@@ -128,47 +120,6 @@ const getOperatorSymbol = (operator: CalcOperator | null): string => {
       return "";
   }
 };
-
-function ProgressBar({
-  spent,
-  total,
-  trackColor,
-  fillColor,
-  labelColor,
-  leftLabelColor,
-}: ProgressBarProps) {
-  const safeTotal = total > 0 ? total : 0;
-  const safeSpent = Math.max(spent, 0);
-  const clampedSpent = safeTotal > 0 ? Math.min(safeSpent, safeTotal) : 0;
-  const remaining = Math.max(safeTotal - clampedSpent, 0);
-  const percentSpent = safeTotal > 0 ? clampedSpent / safeTotal : 0;
-  const percentLabel = Math.round(percentSpent * 100);
-  const percentLeftLabel = 100 - percentLabel;
-  const labelStyle = labelColor ? { color: labelColor } : null;
-  const leftLabelStyle = leftLabelColor ? { color: leftLabelColor } : null;
-
-  return (
-    <View style={[styles.progressBar, trackColor ? { backgroundColor: trackColor } : null]}>
-      <View
-        style={[
-          styles.progressFill,
-          { width: `${percentSpent * 100}%` },
-          fillColor ? { backgroundColor: fillColor } : null,
-        ]}
-      />
-      <View style={styles.progressContent}>
-        <View style={styles.progressLeft}>
-          <Text style={[styles.progressAmount, labelStyle, leftLabelStyle]}>RON {clampedSpent}</Text>
-          <Text style={[styles.progressLabel, labelStyle, leftLabelStyle]}>{percentLabel}% Spent</Text>
-        </View>
-        <View style={styles.progressRight}>
-          <Text style={[styles.progressAmount, labelStyle]}>RON {remaining}</Text>
-          <Text style={[styles.progressLabel, labelStyle]}>{percentLeftLabel}% Left</Text>
-        </View>
-      </View>
-    </View>
-  );
-}
 
 export default function AddExpense() {
   const { cacheVersion } = useRecommendationStore();
@@ -741,17 +692,34 @@ export default function AddExpense() {
         ],
       );
 
-      if (selectedSubcategory) {
-        await upsertSubcategoryPreset(selectedSubcategory, true);
-        addSubcategoryToStateAndCache(selectedSubcategory);
-      }
-      if (selectedShopName) {
-        await upsertShopPreset(selectedShopName, true);
-        addShopToStateAndCache(selectedShopName);
-      }
+      const selectedSubcategorySnapshot = selectedSubcategory;
+      const selectedShopNameSnapshot = selectedShopName;
       setPendingNewSubcategory(null);
       setPendingNewShopName(null);
       handleClose();
+
+      if (selectedSubcategorySnapshot || selectedShopNameSnapshot) {
+        void (async () => {
+          try {
+            await Promise.all([
+              selectedSubcategorySnapshot
+                ? upsertSubcategoryPreset(selectedSubcategorySnapshot, true)
+                : Promise.resolve(),
+              selectedShopNameSnapshot
+                ? upsertShopPreset(selectedShopNameSnapshot, true)
+                : Promise.resolve(),
+            ]);
+            if (selectedSubcategorySnapshot) {
+              addSubcategoryToStateAndCache(selectedSubcategorySnapshot);
+            }
+            if (selectedShopNameSnapshot) {
+              addShopToStateAndCache(selectedShopNameSnapshot);
+            }
+          } catch (presetError) {
+            console.error("Failed to update recommendation presets:", presetError);
+          }
+        })();
+      }
     } catch (error) {
       console.error("Failed to save expense:", error);
       Alert.alert("Could not save", "Database write failed. Check logs and try again.");
@@ -931,7 +899,9 @@ export default function AddExpense() {
                     ]}
                   >
                     {isConfirmKey ? (
-                      readyCalcState ? (
+                      isSavingExpense ? (
+                        <ActivityIndicator size="small" color={styles.keyTextAccent.color} />
+                      ) : readyCalcState ? (
                         <Check size={18} color={styles.keyTextAccent.color} />
                       ) : (
                         <Equal size={18} color={styles.keyTextAccent.color} />
@@ -1071,37 +1041,6 @@ const styles = StyleSheet.create({
     marginTop: "auto",
     backgroundColor: "#ffffffff",
     paddingBottom: 16,
-  },
-  progressBar: {
-    backgroundColor: "#F1D6D6",
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    overflow: "hidden",
-  },
-  progressFill: {
-    backgroundColor: "#F6B3B3",
-    position: "absolute",
-    left: 0,
-    top: 0,
-    bottom: 0,
-  },
-  progressContent: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  progressLeft: {
-    alignItems: "flex-start",
-  },
-  progressRight: {
-    alignItems: "flex-end",
-  },
-  progressAmount: {
-    color: "#D63A3A",
-    fontWeight: "700",
-  },
-  progressLabel: {
-    color: "#D63A3A",
-    fontSize: 12,
   },
   tagsRow: {
     marginTop: 4,

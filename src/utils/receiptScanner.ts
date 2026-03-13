@@ -156,14 +156,62 @@ export const scanReceiptImages = async (): Promise<ReceiptScanOnlyResult> => {
   return { status: "success", scannedImages };
 };
 
-export const analyzeReceiptWithSupabase = async (imageBase64: string): Promise<void> => {
+const loadAnalysisTaxonomy = async (
+  db: SQLiteDatabase,
+): Promise<{ categories: string[]; subcategories: string[] }> => {
+  try {
+    const userRow = await db.getFirstAsync<{ id: number }>(
+      `SELECT id FROM users ORDER BY id ASC LIMIT 1`,
+    );
+
+    if (!userRow?.id) {
+      return { categories: [], subcategories: [] };
+    }
+
+    const categoryRows = await db.getAllAsync<{ categoryName: string }>(
+      `SELECT DISTINCT category_name AS categoryName
+       FROM categories
+       WHERE user_id = ?
+       ORDER BY category_name ASC`,
+      [userRow.id],
+    );
+
+    const subcategoryRows = await db.getAllAsync<{ name: string }>(
+      `SELECT DISTINCT name
+       FROM subcategory_presets
+       WHERE user_id = ? AND is_archived = 0
+       ORDER BY name ASC`,
+      [userRow.id],
+    );
+
+    const categories = categoryRows
+      .map((row) => row.categoryName?.trim())
+      .filter((name): name is string => !!name);
+    const subcategories = subcategoryRows
+      .map((row) => row.name?.trim())
+      .filter((name): name is string => !!name);
+
+    return { categories, subcategories };
+  } catch (error) {
+    console.error("Failed loading taxonomy for receipt analysis:", error);
+    return { categories: [], subcategories: [] };
+  }
+};
+
+export const analyzeReceiptWithSupabase = async (
+  db: SQLiteDatabase,
+  imageBase64: string,
+): Promise<void> => {
+  const { categories, subcategories } = await loadAnalysisTaxonomy(db);
+
   const { data, error } = await supabase.functions.invoke(RECEIPT_ANALYZE_FUNCTION, {
     body: {
       imageBase64,
       mimeType: "image/jpeg",
+      categories,
+      subcategories,
     },
   });
-
   if (error) {
     if (error instanceof FunctionsHttpError) {
       let responseBody = "";

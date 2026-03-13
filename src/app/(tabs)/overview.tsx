@@ -205,7 +205,7 @@ export default function Overview() {
               <View style={styles.topCategoryRow}>
                 <Text style={styles.topCategoryLabel}>Top category</Text>
                 <Text style={styles.topCategoryValue}>
-                  {topSpendingCategory ? `${topSpendingCategory.title} · $${topSpendingCategory.spent.toFixed(2)}` : "No data"}
+                  {topSpendingCategory ? `${topSpendingCategory.title} - $${topSpendingCategory.spent.toFixed(2)}` : "No data"}
                 </Text>
               </View>
             </View>
@@ -575,3 +575,4 @@ const styles = StyleSheet.create({
     color: "#DC2626",
   },
 });
+

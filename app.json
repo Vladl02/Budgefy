@@ -10,7 +10,11 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.AP"
+      "bundleIdentifier": "com.anonymous.AP",
+      "newArchEnabled": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "We need camera access so you can scan receipts."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -19,9 +23,9 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.AP"
+      "package": "com.anonymous.AP",
+      "newArchEnabled": true
     },
     "web": {
       "output": "static",
@@ -42,13 +46,7 @@
         }
       ],
       "expo-font",
-      "expo-sqlite",
-      [
-        "react-native-document-scanner-plugin",
-        {
-          "cameraPermission": "We need camera access so you can scan receipts."
-        }
-      ]
+      "expo-sqlite"
     ],
     "experiments": {
       "typedRoutes": true,

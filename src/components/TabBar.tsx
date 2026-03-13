@@ -1,16 +1,16 @@
-import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
-import { Text } from "@react-navigation/elements";
-import { useTheme } from "@react-navigation/native";
-import { ChartPie, House, ScanLine, Scroll, Settings } from "lucide-react-native";
-import { Alert, InteractionManager, Pressable, StyleSheet, View } from "react-native";
-import { useCallback, useRef } from "react";
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useSQLiteContext } from "expo-sqlite";
 import {
   analyzeReceiptWithSupabase,
   saveScannedReceiptsAsSpending,
   scanReceiptImages,
 } from "@/src/utils/receiptScanner";
+import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
+import { Text } from "@react-navigation/elements";
+import { useTheme } from "@react-navigation/native";
+import { useSQLiteContext } from "expo-sqlite";
+import { ChartPie, House, ScanLine, Scroll, Settings } from "lucide-react-native";
+import { useCallback, useRef } from "react";
+import { Alert, InteractionManager, Pressable, StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const ICONS_BY_ROUTE = {
   index: House,
@@ -45,7 +45,7 @@ export function MyTabBar({ state, descriptors, navigation }: BottomTabBarProps) 
       }
 
       if (scanResult.scannedImages.length > 0) {
-        void analyzeReceiptWithSupabase(scanResult.scannedImages[0]);
+        void analyzeReceiptWithSupabase(db, scanResult.scannedImages[0]);
       }
 
       InteractionManager.runAfterInteractions(() => {

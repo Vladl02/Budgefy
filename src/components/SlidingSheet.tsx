@@ -14,6 +14,8 @@ type SlidingSheetProps = {
   children: React.ReactNode | ((close: () => void) => React.ReactNode);
   onDismiss: () => void;
   heightPercent?: number;
+  fitContent?: boolean;
+  maxHeightPercent?: number;
   backdropOpacity?: number;
   closeThreshold?: number;
   closeOnBackdropPress?: boolean;
@@ -27,6 +29,8 @@ export function SlidingSheet({
   children,
   onDismiss,
   heightPercent = 0.9,
+  fitContent = false,
+  maxHeightPercent = 0.9,
   backdropOpacity = 0.35,
   closeThreshold = 0.2,
   closeOnBackdropPress = true,
@@ -37,8 +41,12 @@ export function SlidingSheet({
 }: SlidingSheetProps) {
   const { height } = useWindowDimensions();
   const clampedPercent = Math.min(Math.max(heightPercent, 0.1), 1);
-  const sheetHeight = Math.round(height * clampedPercent);
-  const translateY = useSharedValue(sheetHeight);
+  const clampedMaxHeightPercent = Math.min(Math.max(maxHeightPercent, 0.1), 1);
+  const fixedSheetHeight = Math.round(height * clampedPercent);
+  const maxSheetHeight = Math.round(height * clampedMaxHeightPercent);
+  const initialDragLimit = fitContent ? height : fixedSheetHeight;
+  const translateY = useSharedValue(initialDragLimit);
+  const dragLimit = useSharedValue(initialDragLimit);
   const closing = useSharedValue(false);
 
   const finishDismiss = useCallback(() => {
@@ -55,10 +63,11 @@ export function SlidingSheet({
           scheduleOnRN(finishDismiss);
         }
       };
+      const dismissTarget = fitContent ? height : fixedSheetHeight;
 
       if (typeof velocityY === "number") {
         translateY.value = withSpring(
-          sheetHeight,
+          dismissTarget,
           {
             damping: 24,
             stiffness: 260,
@@ -71,28 +80,32 @@ export function SlidingSheet({
       }
 
       translateY.value = withTiming(
-        sheetHeight,
+        dismissTarget,
         { duration: 220, easing: Easing.in(Easing.cubic) },
         onFinish
       );
     },
-    [closing, finishDismiss, sheetHeight, translateY]
+    [closing, finishDismiss, fitContent, fixedSheetHeight, height, translateY]
   );
 
   useEffect(() => {
-    translateY.value = sheetHeight;
+    const entryStart = fitContent ? height : fixedSheetHeight;
+    dragLimit.value = entryStart;
+    translateY.value = entryStart;
     requestAnimationFrame(() => {
       translateY.value = withTiming(0, { duration: 260, easing: Easing.out(Easing.cubic) });
     });
-  }, [sheetHeight, translateY]);
+  }, [dragLimit, fitContent, fixedSheetHeight, height, translateY]);
 
   const panGesture = useMemo(() => {
-    const threshold = sheetHeight * closeThreshold;
     return Gesture.Pan()
       .onUpdate((event) => {
-        translateY.value = Math.min(sheetHeight, Math.max(0, event.translationY));
+        const limit = Math.max(1, dragLimit.value);
+        translateY.value = Math.min(limit, Math.max(0, event.translationY));
       })
       .onEnd((event) => {
+        const limit = Math.max(1, dragLimit.value);
+        const threshold = limit * closeThreshold;
         const shouldClose = event.translationY > threshold || event.velocityY > 1200;
         if (shouldClose) {
           scheduleOnRN(requestClose, event.velocityY);
@@ -105,10 +118,11 @@ export function SlidingSheet({
           });
         }
       });
-  }, [closeThreshold, requestClose, sheetHeight, translateY]);
+  }, [closeThreshold, dragLimit, requestClose, translateY]);
 
   const backdropAnimatedStyle = useAnimatedStyle(() => {
-    const progress = sheetHeight > 0 ? 1 - Math.min(translateY.value / sheetHeight, 1) : 0;
+    const limit = Math.max(1, dragLimit.value);
+    const progress = 1 - Math.min(translateY.value / limit, 1);
     return { opacity: backdropOpacity * progress };
   });
 
@@ -127,7 +141,21 @@ export function SlidingSheet({
       </BackdropWrapper>
 
       <GestureDetector gesture={panGesture}>
-        <Animated.View style={[styles.sheet, { height: sheetHeight }, sheetAnimatedStyle, sheetStyle]}>
+        <Animated.View
+          onLayout={(event) => {
+            if (fitContent) {
+              dragLimit.value = event.nativeEvent.layout.height;
+            }
+          }}
+          style={[
+            styles.sheet,
+            fitContent
+              ? { maxHeight: maxSheetHeight }
+              : { height: fixedSheetHeight },
+            sheetAnimatedStyle,
+            sheetStyle,
+          ]}
+        >
           {showHandle ? <View style={[styles.handleIndicator, handleStyle]} /> : null}
           {content}
         </Animated.View>

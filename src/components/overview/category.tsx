@@ -1,4 +1,3 @@
-import { AppText } from "@/src/app/(tabs)";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import {
@@ -161,7 +160,7 @@ export default function CategoryCard({
             <IconComponent size={22} strokeWidth={2.5} color={activeColor} />
           </View>
           <View style={styles.titleRow}>
-            <AppText style={styles.titleText}>{title}</AppText>
+            <Text style={styles.titleText}>{title}</Text>
             <ChevronRight size={16} strokeWidth={3} color="#374151" />
           </View>
         </View>

@@ -52,6 +52,22 @@ async function setPreference(
   await db.runAsync(UPSERT_SQL, [key, value]);
 }
 
+export async function getAppPreference(
+  db: SQLiteDatabase,
+  key: string,
+  fallback = "",
+): Promise<string> {
+  return getPreference(db, key, fallback);
+}
+
+export async function setAppPreference(
+  db: SQLiteDatabase,
+  key: string,
+  value: string,
+): Promise<void> {
+  await setPreference(db, key, value);
+}
+
 export async function getBaseCurrencyPreference(db: SQLiteDatabase): Promise<string> {
   return getPreference(db, KEY_BASE_CURRENCY, DEFAULT_BASE_CURRENCY);
 }
