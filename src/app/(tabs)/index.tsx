@@ -48,8 +48,8 @@ import {
   X,
   Zap,
 } from "lucide-react-native";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Animated, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { categoriesForMonth, paymentSumsByCategory } from "@/src/utils/queries";
@@ -253,7 +253,6 @@ function HomeContent() {
   const [categoryOrderIds, setCategoryOrderIds] = useState<string[] | null>(null);
   const [homeLayoutStyle, setHomeLayoutStyle] = useState<HomeLayoutStyle>("grid");
   const [isCategoryEditing, setIsCategoryEditing] = useState(false);
-  const shakeValue = useRef(new Animated.Value(0)).current;
   const latestAvailableMonth = useMemo(
     () => new Date(new Date().getFullYear(), new Date().getMonth(), 1),
     [],
@@ -283,44 +282,6 @@ function HomeContent() {
     () => `${HOME_CATEGORY_ORDER_KEY_PREFIX}_${currentMonth.getTime()}`,
     [currentMonth],
   );
-  const shakeRotate = useMemo(
-    () =>
-      shakeValue.interpolate({
-        inputRange: [-1, 0, 1],
-        outputRange: ["-1.7deg", "0deg", "1.7deg"],
-      }),
-    [shakeValue],
-  );
-
-  useEffect(() => {
-    if (!isCategoryEditing) {
-      shakeValue.stopAnimation();
-      shakeValue.setValue(0);
-      return;
-    }
-
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(shakeValue, {
-          toValue: -1,
-          duration: 90,
-          useNativeDriver: true,
-        }),
-        Animated.timing(shakeValue, {
-          toValue: 1,
-          duration: 150,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-
-    loop.start();
-    return () => {
-      loop.stop();
-      shakeValue.stopAnimation();
-      shakeValue.setValue(0);
-    };
-  }, [isCategoryEditing, shakeValue]);
 
   const categoriesQuery = useMemo(
     () => categoriesForMonth(db, currentMonth),
@@ -553,9 +514,6 @@ function HomeContent() {
   const handleSelectPresetCategory = useCallback((presetName: string) => {
     setSelectedCategoryPreset(presetName);
   }, []);
-  const handleCategoryOrderPreview = useCallback((nextCategoryIds: string[]) => {
-    setCategoryOrderIds(nextCategoryIds);
-  }, []);
   const handleCategoryOrderCommit = useCallback(
     (nextCategoryIds: string[]) => {
       setCategoryOrderIds(nextCategoryIds);
@@ -697,8 +655,6 @@ function HomeContent() {
             onLongPressItem={handleLongPressCategory}
             onDeleteItem={handleDeleteCategory}
             isEditing={isCategoryEditing}
-            shakeAnim={shakeRotate}
-            onReorderPreview={handleCategoryOrderPreview}
             onReorderCommit={handleCategoryOrderCommit}
           />
         </View>

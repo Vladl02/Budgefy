@@ -2,12 +2,28 @@ import { LinearGradient } from "expo-linear-gradient";
 import type { LucideIcon } from "lucide-react-native";
 import { Plus, X } from "lucide-react-native";
 import React from "react";
-import { Pressable, StyleSheet, Text, type GestureResponderEvent, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, type GestureResponderEvent, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import { useAppTheme } from "@/src/providers/AppThemeProvider";
 
 const DEFAULT_CARD_WIDTH = 106;
 const DEFAULT_CARD_HEIGHT = 140;
+
+const blendHexWithWhite = (hex: string, amount: number): string => {
+  const normalized = hex.replace("#", "").trim();
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) {
+    return hex;
+  }
+
+  const clampAmount = Math.max(0, Math.min(amount, 1));
+  const r = Number.parseInt(normalized.slice(0, 2), 16);
+  const g = Number.parseInt(normalized.slice(2, 4), 16);
+  const b = Number.parseInt(normalized.slice(4, 6), 16);
+
+  const mix = (channel: number) =>
+    Math.round(channel + (255 - channel) * clampAmount);
+  return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
+};
 
 type ExpenseBoxProps = {
   amount?: string | number;
@@ -27,7 +43,7 @@ type ExpenseBoxProps = {
   onDelete?: () => void;
 };
 
-export default function ExpenseBox({
+function ExpenseBox({
   amount,
   backgroundColor,
   circleColor,
@@ -45,6 +61,8 @@ export default function ExpenseBox({
   onDelete,
 }: ExpenseBoxProps) {
   const { isDark } = useAppTheme();
+  const isAndroid = Platform.OS === "android";
+  const showGlassGradient = !isAndroid;
   const didLongPress = React.useRef(false);
   const ringSize = 52;
   const ringStrokeWidth = 3;
@@ -62,12 +80,21 @@ export default function ExpenseBox({
   const absTrendPercent = hasTrend ? Math.min(999, Math.round(Math.abs(trendPercent as number))) : 0;
   const isTrendUp = hasTrend ? (trendPercent as number) > 0.4 : false;
   const isTrendDown = hasTrend ? (trendPercent as number) < -0.4 : false;
-  const trendArrow = isTrendUp ? "↑" : isTrendDown ? "↓" : "→";
+  const trendArrow = isTrendUp ? "\u2191" : isTrendDown ? "\u2193" : "\u2192";
   const trendColor = isTrendUp ? "#EF4444" : isTrendDown ? "#10B981" : isDark ? "#9CA3AF" : "#6B7280";
   const trendBgColor = isDark ? "rgba(17,24,39,0.62)" : "rgba(255,255,255,0.74)";
 
   const cardTint = backgroundColor ?? (isDark ? "rgba(25,32,45,0.7)" : "rgba(248,249,252,0.75)");
-  const iconBadgeColor = circleColor ?? (isDark ? "rgba(31,41,55,0.6)" : "rgba(255,255,255,0.58)");
+  const cardSurfaceColor = isAndroid
+    ? circleColor
+      ? blendHexWithWhite(circleColor, isDark ? 0.42 : 0.68)
+      : isDark
+        ? "rgb(40, 52, 71)"
+        : "rgb(243, 246, 251)"
+    : null;
+  const iconBadgeColor = isAndroid
+    ? circleColor ?? (isDark ? "rgb(55, 65, 81)" : "rgb(255, 255, 255)")
+    : circleColor ?? (isDark ? "rgba(31,41,55,0.6)" : "rgba(255,255,255,0.58)");
 
   const handlePress = (event: GestureResponderEvent) => {
     event.stopPropagation();
@@ -86,16 +113,20 @@ export default function ExpenseBox({
 
   const renderGlassLayers = () => (
     <>
-      <View style={[styles.tintLayer, { backgroundColor: cardTint }]} />
-      <LinearGradient
-        pointerEvents="none"
-        colors={
-          isDark
-            ? ["rgba(255,255,255,0.08)", "rgba(255,255,255,0.02)"]
-            : ["rgba(255,255,255,0.64)", "rgba(255,255,255,0.18)"]
-        }
-        style={styles.glassGradient}
-      />
+      {!isAndroid ? (
+        <View pointerEvents="none" style={[styles.tintLayer, { backgroundColor: cardTint }]} />
+      ) : null}
+      {showGlassGradient ? (
+        <LinearGradient
+          pointerEvents="none"
+          colors={
+            isDark
+              ? ["rgba(255,255,255,0.08)", "rgba(255,255,255,0.02)"]
+              : ["rgba(255,255,255,0.64)", "rgba(255,255,255,0.18)"]
+          }
+          style={styles.glassGradient}
+        />
+      ) : null}
     </>
   );
 
@@ -119,21 +150,24 @@ export default function ExpenseBox({
           onPress?.();
         }}
         style={({ pressed }) => [
-          styles.container,
+          styles.shell,
           { width: cardWidth, height: cardHeight },
           styles.cardBase,
           isDark ? styles.cardBaseDark : styles.cardBaseLight,
-          styles.addCard,
           pressed ? styles.cardPressed : null,
         ]}
       >
-        {renderGlassLayers()}
-        <View style={[styles.addPlusCircle, isDark ? styles.addPlusCircleDark : null]}>
-          <Plus size={20} color={isDark ? "#E5E7EB" : "#1F2937"} />
+        <View style={[styles.surface, cardSurfaceColor ? { backgroundColor: cardSurfaceColor } : null]}>
+          {renderGlassLayers()}
+          <View style={[styles.content, styles.addCard]}>
+            <View style={[styles.addPlusCircle, isDark ? styles.addPlusCircleDark : null]}>
+              <Plus size={20} color={isDark ? "#E5E7EB" : "#1F2937"} />
+            </View>
+            <Text style={[styles.addTitle, isDark ? styles.addTitleDark : null]} numberOfLines={2}>
+              {name}
+            </Text>
+          </View>
         </View>
-        <Text style={[styles.addTitle, isDark ? styles.addTitleDark : null]} numberOfLines={2}>
-          {name}
-        </Text>
       </Pressable>
     );
   }
@@ -142,13 +176,52 @@ export default function ExpenseBox({
     return (
       <View
         style={[
-          styles.container,
+          styles.shell,
           { width: cardWidth, height: cardHeight },
           styles.cardBase,
           isDark ? styles.cardBaseDark : styles.cardBaseLight,
         ]}
       >
-        {renderGlassLayers()}
+        <View style={[styles.surface, cardSurfaceColor ? { backgroundColor: cardSurfaceColor } : null]}>
+          {renderGlassLayers()}
+          <View style={styles.content}>
+            <Text style={[styles.name, isDark ? styles.textDark : null]} numberOfLines={2}>
+              {name}
+            </Text>
+            <View style={styles.iconRingWrap}>
+              {hasBudgetProgress ? (
+                <Svg width={ringSize} height={ringSize} style={styles.progressRing}>
+                  <Circle
+                    cx={ringSize / 2}
+                    cy={ringSize / 2}
+                    r={ringRadius}
+                    stroke={ringColor}
+                    strokeOpacity={trackOpacity}
+                    strokeWidth={ringStrokeWidth}
+                    fill="none"
+                  />
+                  <Circle
+                    cx={ringSize / 2}
+                    cy={ringSize / 2}
+                    r={ringRadius}
+                    stroke={ringColor}
+                    strokeOpacity={progressOpacity}
+                    strokeWidth={ringStrokeWidth}
+                    strokeLinecap="round"
+                    strokeDasharray={`${ringCircumference} ${ringCircumference}`}
+                    strokeDashoffset={progressDashOffset}
+                    fill="none"
+                    transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
+                  />
+                </Svg>
+              ) : null}
+              <View style={[styles.iconCircle, { backgroundColor: iconBadgeColor }]}>{renderIcon()}</View>
+            </View>
+            <Text style={[styles.amount, isDark ? styles.textDark : null]} numberOfLines={1}>
+              ${amount ?? 0}
+            </Text>
+          </View>
+        </View>
         <Pressable
           style={styles.deleteButton}
           hitSlop={10}
@@ -159,41 +232,6 @@ export default function ExpenseBox({
         >
           <X size={11} color="#FFFFFF" strokeWidth={3} />
         </Pressable>
-        <Text style={[styles.name, isDark ? styles.textDark : null]} numberOfLines={2}>
-          {name}
-        </Text>
-        <View style={styles.iconRingWrap}>
-          {hasBudgetProgress ? (
-            <Svg width={ringSize} height={ringSize} style={styles.progressRing}>
-              <Circle
-                cx={ringSize / 2}
-                cy={ringSize / 2}
-                r={ringRadius}
-                stroke={ringColor}
-                strokeOpacity={trackOpacity}
-                strokeWidth={ringStrokeWidth}
-                fill="none"
-              />
-              <Circle
-                cx={ringSize / 2}
-                cy={ringSize / 2}
-                r={ringRadius}
-                stroke={ringColor}
-                strokeOpacity={progressOpacity}
-                strokeWidth={ringStrokeWidth}
-                strokeLinecap="round"
-                strokeDasharray={`${ringCircumference} ${ringCircumference}`}
-                strokeDashoffset={progressDashOffset}
-                fill="none"
-                transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
-              />
-            </Svg>
-          ) : null}
-          <View style={[styles.iconCircle, { backgroundColor: iconBadgeColor }]}>{renderIcon()}</View>
-        </View>
-        <Text style={[styles.amount, isDark ? styles.textDark : null]} numberOfLines={1}>
-          ${amount ?? 0}
-        </Text>
       </View>
     );
   }
@@ -204,14 +242,53 @@ export default function ExpenseBox({
       onLongPress={handleLongPress}
       delayLongPress={220}
       style={({ pressed }) => [
-        styles.container,
+        styles.shell,
         { width: cardWidth, height: cardHeight },
         styles.cardBase,
         isDark ? styles.cardBaseDark : styles.cardBaseLight,
         pressed ? styles.cardPressed : null,
       ]}
     >
-      {renderGlassLayers()}
+      <View style={[styles.surface, cardSurfaceColor ? { backgroundColor: cardSurfaceColor } : null]}>
+        {renderGlassLayers()}
+        <View style={styles.content}>
+          <Text style={[styles.name, isDark ? styles.textDark : null]} numberOfLines={2}>
+            {name}
+          </Text>
+          <View style={styles.iconRingWrap}>
+            {hasBudgetProgress ? (
+              <Svg width={ringSize} height={ringSize} style={styles.progressRing}>
+                <Circle
+                  cx={ringSize / 2}
+                  cy={ringSize / 2}
+                  r={ringRadius}
+                  stroke={ringColor}
+                  strokeOpacity={trackOpacity}
+                  strokeWidth={ringStrokeWidth}
+                  fill="none"
+                />
+                <Circle
+                  cx={ringSize / 2}
+                  cy={ringSize / 2}
+                  r={ringRadius}
+                  stroke={ringColor}
+                  strokeOpacity={progressOpacity}
+                  strokeWidth={ringStrokeWidth}
+                  strokeLinecap="round"
+                  strokeDasharray={`${ringCircumference} ${ringCircumference}`}
+                  strokeDashoffset={progressDashOffset}
+                  fill="none"
+                  transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
+                />
+              </Svg>
+            ) : null}
+            <View style={[styles.iconCircle, { backgroundColor: iconBadgeColor }]}>{renderIcon()}</View>
+          </View>
+          <Text style={[styles.amount, isDark ? styles.textDark : null]} numberOfLines={1}>
+            ${amount ?? 0}
+          </Text>
+        </View>
+      </View>
       {hasTrend ? (
         <View style={[styles.trendBadge, { backgroundColor: trendBgColor }]}>
           <Text style={[styles.trendBadgeText, { color: trendColor }]}>
@@ -219,57 +296,32 @@ export default function ExpenseBox({
           </Text>
         </View>
       ) : null}
-      <Text style={[styles.name, isDark ? styles.textDark : null]} numberOfLines={2}>
-        {name}
-      </Text>
-      <View style={styles.iconRingWrap}>
-        {hasBudgetProgress ? (
-          <Svg width={ringSize} height={ringSize} style={styles.progressRing}>
-            <Circle
-              cx={ringSize / 2}
-              cy={ringSize / 2}
-              r={ringRadius}
-              stroke={ringColor}
-              strokeOpacity={trackOpacity}
-              strokeWidth={ringStrokeWidth}
-              fill="none"
-            />
-            <Circle
-              cx={ringSize / 2}
-              cy={ringSize / 2}
-              r={ringRadius}
-              stroke={ringColor}
-              strokeOpacity={progressOpacity}
-              strokeWidth={ringStrokeWidth}
-              strokeLinecap="round"
-              strokeDasharray={`${ringCircumference} ${ringCircumference}`}
-              strokeDashoffset={progressDashOffset}
-              fill="none"
-              transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
-            />
-          </Svg>
-        ) : null}
-        <View style={[styles.iconCircle, { backgroundColor: iconBadgeColor }]}>{renderIcon()}</View>
-      </View>
-      <Text style={[styles.amount, isDark ? styles.textDark : null]} numberOfLines={1}>
-        ${amount ?? 0}
-      </Text>
     </Pressable>
   );
 }
 
+export default React.memo(ExpenseBox);
+
 const styles = StyleSheet.create({
-  container: {
+  shell: {
     position: "relative",
     width: DEFAULT_CARD_WIDTH,
     height: DEFAULT_CARD_HEIGHT,
     borderRadius: 22,
     borderCurve: "continuous",
+  },
+  surface: {
+    flex: 1,
+    borderRadius: 22,
+    borderCurve: "continuous",
+    overflow: "hidden",
+  },
+  content: {
+    flex: 1,
     paddingVertical: 12,
     paddingHorizontal: 10,
     alignItems: "center",
     justifyContent: "space-between",
-    overflow: "hidden",
   },
   cardBase: {
     borderWidth: 1,
