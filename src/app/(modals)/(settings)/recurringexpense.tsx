@@ -14,7 +14,28 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SlidingSheet } from "@/src/components/SlidingSheet";
-import { Plus, CreditCard, ChevronLeft, Bell, Trash2, Search, Check, ChevronRight, BellRing, CalendarClock, Sparkles } from 'lucide-react-native';
+import { Plus, CreditCard, ChevronLeft, Bell, Trash2, Search, Check, ChevronRight, BellRing } from 'lucide-react-native';
+import Svg, { Path } from "react-native-svg";
+import {
+  siApple,
+  siDiscord,
+  siDropbox,
+  siGithub,
+  siGoogle,
+  siGoogleplay,
+  siHbo,
+  siHbomax,
+  siIcloud,
+  siNetflix,
+  siNotion,
+  siPatreon,
+  siPaypal,
+  siSpotify,
+  siUber,
+  siX,
+  siYoutube,
+} from "simple-icons";
+import type { SimpleIcon } from "simple-icons";
 
 // ---------------------------------------------------------------------------
 // 🚨 CRASH FIX: MOCKING NOTIFICATIONS 🚨
@@ -97,21 +118,56 @@ const INITIAL_PAYMENTS: Payment[] = [
 const ICON_PALETTE = [
   "#57A7FD", "#FE5A59", "#FFC83C", "#00DDB7", "#7E57FF", "#FF8544", "#F472B6",
 ];
-const TIMELINE_MIN_GAP_PERCENT = 8;
-const TIMELINE_MAX_LANES = 3;
+const CALENDAR_WEEK_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-const OPTIONAL_SUBSCRIPTION_KEYWORDS = [
-  "netflix",
-  "spotify",
-  "hbo",
-  "disney",
-  "prime",
-  "youtube",
-  "apple",
-  "icloud",
-  "adobe",
-  "gym",
+type BrandIconMatch = {
+  icon: SimpleIcon;
+  keywords: string[];
+};
+
+const BRAND_ICON_MATCHERS: BrandIconMatch[] = [
+  { icon: siApple, keywords: ["apple", "apple tv", "apple music", "apple one"] },
+  { icon: siIcloud, keywords: ["icloud"] },
+  { icon: siNetflix, keywords: ["netflix"] },
+  { icon: siSpotify, keywords: ["spotify"] },
+  { icon: siYoutube, keywords: ["youtube", "youtube premium", "yt"] },
+  { icon: siHbomax, keywords: ["hbo max", "max"] },
+  { icon: siHbo, keywords: ["hbo"] },
+  { icon: siGoogleplay, keywords: ["google play", "play store"] },
+  { icon: siGoogle, keywords: ["google", "google one"] },
+  { icon: siUber, keywords: ["uber", "uber one"] },
+  { icon: siPaypal, keywords: ["paypal"] },
+  { icon: siPatreon, keywords: ["patreon"] },
+  { icon: siDiscord, keywords: ["discord"] },
+  { icon: siGithub, keywords: ["github"] },
+  { icon: siDropbox, keywords: ["dropbox"] },
+  { icon: siNotion, keywords: ["notion"] },
+  { icon: siX, keywords: ["twitter", "x premium", "x.com"] },
 ];
+
+const normalizeBrandText = (value: string): string =>
+  value.trim().toLowerCase().replace(/\s+/g, " ");
+
+const resolveBrandIcon = (value: string): SimpleIcon | null => {
+  const normalized = normalizeBrandText(value);
+  if (!normalized) return null;
+
+  for (const candidate of BRAND_ICON_MATCHERS) {
+    if (candidate.keywords.some((keyword) => normalized.includes(keyword))) {
+      return candidate.icon;
+    }
+  }
+
+  return null;
+};
+
+function SimpleBrandIcon({ icon, size = 18 }: { icon: SimpleIcon; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path d={icon.path} fill={`#${icon.hex}`} />
+    </Svg>
+  );
+}
 
 export default function RecurringExpense() {
   const router = useRouter();
@@ -121,6 +177,7 @@ export default function RecurringExpense() {
   const [isSelectingCurrency, setIsSelectingCurrency] = useState(false); 
   const [searchText, setSearchText] = useState("");
   const [isLoadingRates, setIsLoadingRates] = useState(true);
+  const showHeader = isAdding || isSelectingCurrency;
 
   // Data States
   const [payments, setPayments] = useState<Payment[]>(INITIAL_PAYMENTS);
@@ -131,8 +188,7 @@ export default function RecurringExpense() {
   
   const [reminderOffset, setReminderOffset] = useState(0); 
   const [exchangeRates, setExchangeRates] = useState<Record<string, number>>(FALLBACK_RATES);
-  const [reviewingSuggestionIds, setReviewingSuggestionIds] = useState<string[]>([]);
-  const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState<string[]>([]);
+  const draftBrandIcon = useMemo(() => resolveBrandIcon(name), [name]);
 
   // --- EFFECTS ---
 
@@ -203,6 +259,7 @@ export default function RecurringExpense() {
 
     const symbol = currency.symbol;
     const amountStr = `${amount}${symbol}`;
+    const detectedBrandIcon = resolveBrandIcon(name);
     
     const notificationId = await scheduleReminder(name, amountStr, day, reminderOffset);
 
@@ -211,7 +268,7 @@ export default function RecurringExpense() {
       name,
       amount: parseFloat(amount),
       day: day.padStart(2, '0'),
-      color: ICON_PALETTE[payments.length % ICON_PALETTE.length],
+      color: detectedBrandIcon ? `#${detectedBrandIcon.hex}` : ICON_PALETTE[payments.length % ICON_PALETTE.length],
       currency: currency.code,
       notificationId,
       reminderOffset,
@@ -262,112 +319,55 @@ export default function RecurringExpense() {
     }, 0);
   }, [payments, exchangeRates]);
   const annualSpendRON = useMemo(() => totalMonthlyRON * 12, [totalMonthlyRON]);
-  const timelineMonthLabel = useMemo(
+  const calendarMonthLabel = useMemo(
     () => new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" }),
     [],
   );
-
-  const chargeProjections = useMemo(() => {
+  const todayDayOfMonth = useMemo(() => new Date().getDate(), []);
+  const calendarMonthStart = useMemo(() => {
     const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const currentMonthDays = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-    const nextMonthDays = new Date(now.getFullYear(), now.getMonth() + 2, 0).getDate();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  }, []);
+  const daysInCurrentMonth = useMemo(
+    () => new Date(calendarMonthStart.getFullYear(), calendarMonthStart.getMonth() + 1, 0).getDate(),
+    [calendarMonthStart],
+  );
+  const firstWeekdayIndex = useMemo(() => calendarMonthStart.getDay(), [calendarMonthStart]);
 
-    return payments.map((payment) => {
-      const rate = exchangeRates[payment.currency] || 1;
-      const safeRate = rate === 0 ? 1 : rate;
-      const ronAmount = payment.amount / safeRate;
+  const subscriptionsByDay = useMemo(() => {
+    const grouped = new Map<number, Payment[]>();
+
+    payments.forEach((payment) => {
       const rawDay = Number.parseInt(payment.day, 10);
-      const billingDay = Number.isFinite(rawDay) && rawDay > 0 ? rawDay : 1;
-      const dueThisMonth = Math.min(billingDay, currentMonthDays);
+      if (!Number.isFinite(rawDay)) return;
+      const safeDay = Math.max(1, Math.min(daysInCurrentMonth, rawDay));
 
-      let nextDate = new Date(now.getFullYear(), now.getMonth(), dueThisMonth);
-      let isCurrentMonth = true;
-
-      if (dueThisMonth < now.getDate()) {
-        const dueNextMonth = Math.min(billingDay, nextMonthDays);
-        nextDate = new Date(now.getFullYear(), now.getMonth() + 1, dueNextMonth);
-        isCurrentMonth = false;
+      if (!grouped.has(safeDay)) {
+        grouped.set(safeDay, []);
       }
-
-      const daysUntil = Math.max(0, Math.round((nextDate.getTime() - todayStart.getTime()) / 86400000));
-      const rawMarkerPercent = isCurrentMonth
-        ? (currentMonthDays <= 1 ? 0 : ((dueThisMonth - 1) / (currentMonthDays - 1)) * 100)
-        : 100;
-      const markerPercent = Math.max(2, Math.min(98, rawMarkerPercent));
-
-      return {
-        ...payment,
-        ronAmount,
-        nextDate,
-        daysUntil,
-        markerPercent,
-        dueThisMonth,
-        isCurrentMonth,
-      };
+      grouped.get(safeDay)?.push(payment);
     });
-  }, [payments, exchangeRates]);
 
-  const nextCharge = useMemo(() => {
-    if (chargeProjections.length === 0) return null;
-    return [...chargeProjections].sort((a, b) => a.daysUntil - b.daysUntil || b.ronAmount - a.ronAmount)[0];
-  }, [chargeProjections]);
+    return grouped;
+  }, [daysInCurrentMonth, payments]);
 
-  const timelineCharges = useMemo(() => {
-    const currentMonthUpcoming = chargeProjections
-      .filter((item) => item.isCurrentMonth)
-      .sort((a, b) => a.dueThisMonth - b.dueThisMonth);
-    if (currentMonthUpcoming.length > 0) return currentMonthUpcoming;
-    return nextCharge ? [nextCharge] : [];
-  }, [chargeProjections, nextCharge]);
-  const timelineMarkers = useMemo(() => {
-    const laneLastPercent = Array.from({ length: TIMELINE_MAX_LANES }, () => -999);
+  const calendarCells = useMemo(() => {
+    const cells: (number | null)[] = [];
 
-    return timelineCharges.map((charge) => {
-      let lane = laneLastPercent.findIndex(
-        (lastPercent) => charge.markerPercent - lastPercent >= TIMELINE_MIN_GAP_PERCENT,
-      );
+    for (let i = 0; i < firstWeekdayIndex; i += 1) {
+      cells.push(null);
+    }
 
-      if (lane === -1) {
-        lane = laneLastPercent.reduce((bestLane, lastPercent, index) => {
-          if (lastPercent < laneLastPercent[bestLane]) return index;
-          return bestLane;
-        }, 0);
-      }
+    for (let dayOfMonth = 1; dayOfMonth <= daysInCurrentMonth; dayOfMonth += 1) {
+      cells.push(dayOfMonth);
+    }
 
-      laneLastPercent[lane] = charge.markerPercent;
+    while (cells.length % 7 !== 0) {
+      cells.push(null);
+    }
 
-      return {
-        ...charge,
-        lane,
-      };
-    });
-  }, [timelineCharges]);
-  const timelineLegendItems = useMemo(() => timelineMarkers.slice(0, 3), [timelineMarkers]);
-  const timelineLegendExtra = Math.max(timelineMarkers.length - timelineLegendItems.length, 0);
-
-  const smartSuggestion = useMemo(() => {
-    if (chargeProjections.length === 0) return null;
-    const optional = chargeProjections.filter((item) =>
-      OPTIONAL_SUBSCRIPTION_KEYWORDS.some((keyword) => item.name.toLowerCase().includes(keyword)),
-    );
-    const candidatePool = optional.length > 0 ? optional : chargeProjections;
-    const candidate = [...candidatePool].sort((a, b) => b.ronAmount - a.ronAmount)[0];
-    if (!candidate) return null;
-
-    return {
-      id: candidate.id,
-      name: candidate.name,
-      potentialSavingsRON: Math.round(candidate.ronAmount),
-      sharePercent: totalMonthlyRON > 0 ? Math.round((candidate.ronAmount / totalMonthlyRON) * 100) : 0,
-    };
-  }, [chargeProjections, totalMonthlyRON]);
-
-  const activeSuggestion = useMemo(() => {
-    if (!smartSuggestion) return null;
-    if (dismissedSuggestionIds.includes(smartSuggestion.id)) return null;
-    return smartSuggestion;
-  }, [smartSuggestion, dismissedSuggestionIds]);
+    return cells;
+  }, [daysInCurrentMonth, firstWeekdayIndex]);
 
   // --- RENDER HELPERS ---
 
@@ -419,27 +419,125 @@ export default function RecurringExpense() {
             <View style={styles.container}>
               
               {/* Header */}
-              <View style={styles.header}>
-                <View style={styles.headerSide}>
-                  {(isAdding || isSelectingCurrency) && (
+              {showHeader ? (
+                <View style={styles.header}>
+                  <View style={styles.headerSide}>
                     <Pressable onPress={() => isSelectingCurrency ? setIsSelectingCurrency(false) : setIsAdding(false)} hitSlop={10}>
                       <ChevronLeft size={24} color="#1F1F1F" />
                     </Pressable>
-                  )}
+                  </View>
+                  <Text style={styles.mainTitle}>
+                    {isSelectingCurrency ? "Select Currency" : "Add Payment"}
+                  </Text>
+                  <View style={styles.headerSide} />
                 </View>
-                <Text style={styles.mainTitle}>
-                  {isSelectingCurrency ? "Select Currency" : isAdding ? "Add Payment" : "Recurring"}
-                </Text>
-                <View style={styles.headerSide} />
-              </View>
+              ) : null}
 
               {/* View Switcher */}
               {isSelectingCurrency ? renderCurrencyPicker() : !isAdding ? (
                 
                 // --- LIST VIEW ---
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.subtitle}>Manage your automated monthly bills</Text>
                   <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+                    <View style={styles.calendarSection}>
+                      <View style={styles.calendarHead}>
+                        <Text style={styles.calendarTitle}>Subscription Calendar</Text>
+                        <Text style={styles.calendarMonth}>{calendarMonthLabel}</Text>
+                      </View>
+
+                      <View style={styles.calendarLegendRow}>
+                        <View style={styles.calendarLegendItem}>
+                          <View style={[styles.calendarLegendDot, styles.calendarLegendDotToday]} />
+                          <Text style={styles.calendarLegendText}>Today</Text>
+                        </View>
+                        <View style={styles.calendarLegendItem}>
+                          <View style={[styles.calendarLegendDot, styles.calendarLegendDotDue]} />
+                          <Text style={styles.calendarLegendText}>Due date</Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.calendarWeekRow}>
+                        {CALENDAR_WEEK_LABELS.map((label) => (
+                          <Text key={label} style={styles.calendarWeekLabel}>{label}</Text>
+                        ))}
+                      </View>
+
+                      <View style={styles.calendarGrid}>
+                        {calendarCells.map((dayOfMonth, index) => {
+                          if (dayOfMonth === null) {
+                            return <View key={`empty-${index}`} style={[styles.calendarDayCell, styles.calendarDayCellEmpty]} />;
+                          }
+
+                          const daySubscriptions = subscriptionsByDay.get(dayOfMonth) ?? [];
+                          const visibleSubscriptions = daySubscriptions.slice(0, 3);
+                          const hiddenCount = Math.max(daySubscriptions.length - visibleSubscriptions.length, 0);
+                          const isToday = dayOfMonth === todayDayOfMonth;
+                          const hasSubscriptions = daySubscriptions.length > 0;
+                          const dayOfWeekIndex = index % 7;
+                          const isWeekend = dayOfWeekIndex === 0 || dayOfWeekIndex === 6;
+
+                          return (
+                            <View
+                              key={`day-${dayOfMonth}`}
+                              style={[
+                                styles.calendarDayCell,
+                                isWeekend ? styles.calendarDayCellWeekend : null,
+                                hasSubscriptions ? styles.calendarDayCellActive : null,
+                                isToday ? styles.calendarDayCellToday : null,
+                              ]}
+                            >
+                              <View style={styles.calendarDayTopRow}>
+                                <Text
+                                  style={[
+                                    styles.calendarDayNumber,
+                                    isToday ? styles.calendarDayNumberToday : null,
+                                    hasSubscriptions ? styles.calendarDayNumberOnDark : null,
+                                  ]}
+                                >
+                                  {dayOfMonth}
+                                </Text>
+                              </View>
+
+                              <View style={styles.calendarLogoRow}>
+                                {visibleSubscriptions.map((subscription) => {
+                                  const brandIcon = resolveBrandIcon(subscription.name);
+
+                                  return (
+                                    <View
+                                      key={`${subscription.id}-${dayOfMonth}`}
+                                      style={[
+                                        styles.calendarLogoChip,
+                                        hasSubscriptions ? styles.calendarLogoChipOnDark : null,
+                                        !hasSubscriptions ? { backgroundColor: `${subscription.color}1F` } : null,
+                                      ]}
+                                    >
+                                      {brandIcon ? (
+                                        <SimpleBrandIcon icon={brandIcon} size={11} />
+                                      ) : (
+                                        <CreditCard size={11} color={hasSubscriptions ? "#FFFFFF" : subscription.color} />
+                                      )}
+                                    </View>
+                                  );
+                                })}
+                                {hiddenCount > 0 ? (
+                                  <Text
+                                    style={[
+                                      styles.calendarOverflowText,
+                                      hasSubscriptions ? styles.calendarOverflowTextOnDark : null,
+                                    ]}
+                                  >
+                                    +{hiddenCount}
+                                  </Text>
+                                ) : null}
+                              </View>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    </View>
+
+                    <Text style={styles.subtitle}>Manage your automated monthly bills</Text>
+
                     <View style={styles.summaryCard}>
                       <View>
                         <View style={{flexDirection: 'row', alignItems: 'center', gap: 6}}>
@@ -455,126 +553,40 @@ export default function RecurringExpense() {
                       <Bell size={22} color="#1F1F1F" strokeWidth={2} />
                     </View>
 
-                    {nextCharge ? (
-                      <View style={styles.insightCard}>
-                        <View style={styles.insightRow}>
-                          <View style={styles.insightBadge}>
-                            <CalendarClock size={14} color="#111827" />
-                          </View>
-                          <Text style={styles.insightText}>
-                            Next payment in {nextCharge.daysUntil} day{nextCharge.daysUntil === 1 ? "" : "s"} — {nextCharge.name} ({nextCharge.ronAmount.toFixed(0)} RON)
-                          </Text>
-                        </View>
-                        <View style={styles.timelineHead}>
-                          <Text style={styles.timelineTitle}>Upcoming charges</Text>
-                          <Text style={styles.timelineMonth}>{timelineMonthLabel}</Text>
-                        </View>
-                        <View style={styles.timelineTrackWrap}>
-                          <View style={styles.timelineTrack} />
-                          <View style={styles.timelineMarkerLayer}>
-                            {timelineMarkers.map((charge) => (
-                              <View
-                                key={`timeline-${charge.id}`}
-                                style={[
-                                  styles.timelineMarkerWrap,
-                                  {
-                                    left: `${charge.markerPercent}%`,
-                                    top: 3 + charge.lane * 7,
-                                  },
-                                ]}
-                              >
-                                <View style={[styles.timelineMarker, { backgroundColor: charge.color }]} />
-                              </View>
-                            ))}
-                          </View>
-                        </View>
-                        <View style={styles.timelineLegend}>
-                          {timelineLegendItems.map((charge) => (
-                            <View key={`legend-${charge.id}`} style={styles.timelineLegendItem}>
-                              <View style={[styles.timelineLegendDot, { backgroundColor: charge.color }]} />
-                              <Text style={styles.timelineLegendText}>
-                                D{charge.nextDate.getDate()} {charge.name}
-                              </Text>
-                            </View>
-                          ))}
-                          {timelineLegendExtra > 0 ? (
-                            <Text style={styles.timelineMoreText}>+{timelineLegendExtra} more</Text>
-                          ) : null}
-                        </View>
-                      </View>
-                    ) : null}
-
-                    {activeSuggestion ? (
-                      <View style={styles.suggestionCard}>
-                        <View style={styles.suggestionTop}>
-                          <View style={styles.suggestionBadge}>
-                            <Sparkles size={14} color="#FFFFFF" />
-                          </View>
-                          <Text style={styles.suggestionEyebrow}>Smart Suggestion</Text>
-                        </View>
-                        <Text style={styles.suggestionText}>
-                          You haven&apos;t used {activeSuggestion.name} this month. Cancel to save {activeSuggestion.potentialSavingsRON} RON?
-                        </Text>
-                        <Text style={styles.suggestionMeta}>
-                          Potential savings: {activeSuggestion.potentialSavingsRON} RON / month ({activeSuggestion.sharePercent}% of recurring spend)
-                        </Text>
-                        {reviewingSuggestionIds.includes(activeSuggestion.id) ? (
-                          <View style={styles.reviewingPill}>
-                            <Text style={styles.reviewingPillText}>Marked as reviewing</Text>
-                          </View>
-                        ) : (
-                          <View style={styles.suggestionActions}>
-                            <Pressable
-                              style={styles.reviewBtn}
-                              onPress={() =>
-                                setReviewingSuggestionIds((prev) =>
-                                  prev.includes(activeSuggestion.id) ? prev : [...prev, activeSuggestion.id],
-                                )
-                              }
-                            >
-                              <Text style={styles.reviewBtnText}>Mark as reviewing</Text>
-                            </Pressable>
-                            <Pressable
-                              style={styles.dismissBtn}
-                              onPress={() =>
-                                setDismissedSuggestionIds((prev) =>
-                                  prev.includes(activeSuggestion.id) ? prev : [...prev, activeSuggestion.id],
-                                )
-                              }
-                            >
-                              <Text style={styles.dismissBtnText}>Dismiss</Text>
-                            </Pressable>
-                          </View>
-                        )}
-                      </View>
-                    ) : null}
-
                     <Text style={styles.sectionHeader}>Active Subscriptions</Text>
                     
-                    {payments.map((item) => (
-                      <View key={item.id} style={styles.paymentItem}>
-                        <View style={[styles.iconContainer, { backgroundColor: item.color + '15' }]}>
-                          <CreditCard size={18} color={item.color} />
-                        </View>
-                        <View style={styles.paymentInfo}>
-                          <Text style={styles.paymentName}>{item.name}</Text>
-                          <View style={{flexDirection: 'row', alignItems: 'center', gap: 4}}>
-                            <Text style={styles.paymentDate}>Day {item.day}</Text>
-                            {/* Show icon only if notification was successfully set */}
-                            {item.notificationId && <BellRing size={12} color="#999" />}
+                    {payments.map((item) => {
+                      const paymentBrandIcon = resolveBrandIcon(item.name);
+
+                      return (
+                        <View key={item.id} style={styles.paymentItem}>
+                          <View style={[styles.iconContainer, { backgroundColor: item.color + '15' }]}>
+                            {paymentBrandIcon ? (
+                              <SimpleBrandIcon icon={paymentBrandIcon} size={18} />
+                            ) : (
+                              <CreditCard size={18} color={item.color} />
+                            )}
+                          </View>
+                          <View style={styles.paymentInfo}>
+                            <Text style={styles.paymentName}>{item.name}</Text>
+                            <View style={{flexDirection: 'row', alignItems: 'center', gap: 4}}>
+                              <Text style={styles.paymentDate}>Day {item.day}</Text>
+                              {/* Show icon only if notification was successfully set */}
+                              {item.notificationId && <BellRing size={12} color="#999" />}
+                            </View>
+                          </View>
+                          <View style={{ alignItems: 'flex-end' }}>
+                            <Text style={styles.paymentAmount}>-{getSymbol(item.currency)}{item.amount.toFixed(2)}</Text>
+                            {item.currency !== 'RON' && (
+                              <Text style={styles.convertedText}>≈ {((item.amount / (exchangeRates[item.currency] || 1))).toFixed(0)} lei</Text>
+                            )}
+                            <Pressable onPress={() => deletePayment(item.id)} style={{marginTop: 6}}>
+                              <Trash2 size={16} color="#FFBABA" />
+                            </Pressable>
                           </View>
                         </View>
-                        <View style={{ alignItems: 'flex-end' }}>
-                          <Text style={styles.paymentAmount}>-{getSymbol(item.currency)}{item.amount.toFixed(2)}</Text>
-                          {item.currency !== 'RON' && (
-                             <Text style={styles.convertedText}>≈ {((item.amount / (exchangeRates[item.currency] || 1))).toFixed(0)} lei</Text>
-                          )}
-                          <Pressable onPress={() => deletePayment(item.id)} style={{marginTop: 6}}>
-                             <Trash2 size={16} color="#FFBABA" />
-                          </Pressable>
-                        </View>
-                      </View>
-                    ))}
+                      );
+                    })}
 
                     <Pressable style={styles.addButton} onPress={() => setIsAdding(true)}>
                       <Plus size={20} color="white" />
@@ -598,6 +610,12 @@ export default function RecurringExpense() {
                       onChangeText={setName}
                       autoFocus
                     />
+                    {draftBrandIcon ? (
+                      <View style={styles.brandPreviewPill}>
+                        <SimpleBrandIcon icon={draftBrandIcon} size={14} />
+                        <Text style={styles.brandPreviewText}>Detected brand logo</Text>
+                      </View>
+                    ) : null}
                   </View>
 
                   <View style={styles.rowInputs}>
@@ -681,43 +699,153 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, minHeight: 40 },
   headerSide: { width: 40 },
   mainTitle: { fontSize: 20, fontWeight: "800", color: "#1F1F1F" },
-  subtitle: { fontSize: 13, color: "#666", marginBottom: 20, textAlign: "center" },
+  subtitle: { fontSize: 13, color: "#666", marginTop: 2, marginBottom: 12, textAlign: "center" },
   scrollContent: { paddingBottom: 20 },
   summaryCard: { backgroundColor: '#F7F7F7', borderRadius: 16, padding: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, borderWidth: 1, borderColor: '#EEEEEE' },
   summaryLabel: { fontSize: 12, color: '#666', fontWeight: '700', textTransform: 'uppercase' },
   summaryAmount: { fontSize: 26, fontWeight: '800', color: '#1F1F1F', marginTop: 4 },
   summaryCurrency: { fontSize: 16, fontWeight: '600', color: '#999', marginBottom: 2 },
   summaryAnnual: { marginTop: 4, fontSize: 12, fontWeight: '600', color: '#4B5563' },
-  insightCard: { marginTop: -10, marginBottom: 14, borderRadius: 14, borderWidth: 1, borderColor: '#E5E7EB', backgroundColor: '#F9FAFB', padding: 12 },
-  insightRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  insightBadge: { width: 24, height: 24, borderRadius: 8, backgroundColor: '#EEF2FF', borderWidth: 1, borderColor: '#D1D5DB', alignItems: 'center', justifyContent: 'center' },
-  insightText: { flex: 1, fontSize: 13, fontWeight: '700', color: '#111827' },
-  timelineHead: { marginTop: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  timelineTitle: { fontSize: 11, fontWeight: '700', color: '#4B5563', textTransform: 'uppercase' },
-  timelineMonth: { fontSize: 11, fontWeight: '600', color: '#6B7280' },
-  timelineTrackWrap: { marginTop: 10, height: 28, justifyContent: 'center', position: 'relative' },
-  timelineTrack: { height: 8, borderRadius: 999, backgroundColor: '#E5E7EB' },
-  timelineMarkerLayer: { ...StyleSheet.absoluteFillObject },
-  timelineMarkerWrap: { position: 'absolute', marginLeft: -6 },
-  timelineMarker: { width: 12, height: 12, borderRadius: 999, borderWidth: 2, borderColor: '#FFFFFF' },
-  timelineLegend: { marginTop: 10, flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  timelineLegendItem: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
-  timelineLegendDot: { width: 6, height: 6, borderRadius: 999 },
-  timelineLegendText: { fontSize: 11, fontWeight: '600', color: '#374151' },
-  timelineMoreText: { alignSelf: 'center', fontSize: 11, fontWeight: '700', color: '#6B7280' },
-  suggestionCard: { marginBottom: 16, borderRadius: 14, borderWidth: 1, borderColor: '#E5E7EB', backgroundColor: '#FFFFFF', padding: 12 },
-  suggestionTop: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  suggestionBadge: { width: 22, height: 22, borderRadius: 7, backgroundColor: '#111827', alignItems: 'center', justifyContent: 'center' },
-  suggestionEyebrow: { fontSize: 11, fontWeight: '800', color: '#111827', textTransform: 'uppercase', letterSpacing: 0.5 },
-  suggestionText: { marginTop: 8, fontSize: 14, fontWeight: '700', color: '#111827', lineHeight: 20 },
-  suggestionMeta: { marginTop: 6, fontSize: 12, color: '#6B7280', fontWeight: '500' },
-  suggestionActions: { marginTop: 10, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  reviewBtn: { backgroundColor: '#111827', borderRadius: 10, paddingVertical: 9, paddingHorizontal: 12 },
-  reviewBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
-  dismissBtn: { borderRadius: 10, borderWidth: 1, borderColor: '#D1D5DB', paddingVertical: 9, paddingHorizontal: 12, backgroundColor: '#FFFFFF' },
-  dismissBtnText: { color: '#374151', fontSize: 12, fontWeight: '700' },
-  reviewingPill: { marginTop: 10, alignSelf: 'flex-start', borderRadius: 999, backgroundColor: '#ECFDF3', borderWidth: 1, borderColor: '#A7F3D0', paddingHorizontal: 10, paddingVertical: 6 },
-  reviewingPillText: { color: '#047857', fontSize: 12, fontWeight: '700' },
+  calendarSection: { marginTop: -2, marginBottom: 12 },
+  calendarHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  calendarTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#0F172A',
+    letterSpacing: 0.2,
+  },
+  calendarMonth: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#374151',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  calendarLegendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginBottom: 12,
+  },
+  calendarLegendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  calendarLegendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  calendarLegendDotToday: {
+    backgroundColor: '#111827',
+  },
+  calendarLegendDotDue: {
+    backgroundColor: '#D1D5DB',
+  },
+  calendarLegendText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  calendarWeekRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  calendarWeekLabel: {
+    width: '13.5%',
+    textAlign: 'center',
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#9AA2AF',
+    textTransform: 'uppercase',
+  },
+  calendarGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: 7,
+  },
+  calendarDayCell: {
+    width: '13.5%',
+    minHeight: 66,
+    borderRadius: 12,
+    paddingHorizontal: 5,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
+  },
+  calendarDayCellEmpty: {
+    backgroundColor: 'transparent',
+    borderColor: 'transparent',
+    borderWidth: 0,
+  },
+  calendarDayCellWeekend: {
+    backgroundColor: '#FCFCFD',
+  },
+  calendarDayCellActive: {
+    backgroundColor: '#1E1E22',
+    borderColor: '#2B2B31',
+  },
+  calendarDayCellToday: {
+    borderColor: '#111827',
+    backgroundColor: '#F3F4F6',
+  },
+  calendarDayTopRow: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 1,
+  },
+  calendarDayNumber: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#4B5563',
+    textAlign: 'center',
+  },
+  calendarDayNumberToday: {
+    color: '#111827',
+  },
+  calendarDayNumberOnDark: {
+    color: '#FFFFFF',
+  },
+  calendarLogoRow: {
+    flex: 1,
+    width: '100%',
+    marginTop: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignContent: 'center',
+    gap: 3,
+    flexWrap: 'wrap',
+  },
+  calendarLogoChip: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calendarLogoChipOnDark: {
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+  },
+  calendarOverflowText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#4B5563',
+  },
+  calendarOverflowTextOnDark: {
+    color: '#E5E7EB',
+  },
   sectionHeader: { fontSize: 15, fontWeight: '700', color: '#1F1F1F', marginBottom: 12 },
   paymentItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F2F2F2' },
   iconContainer: { width: 42, height: 42, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 14 },
@@ -733,6 +861,24 @@ const styles = StyleSheet.create({
   inputGroup: { marginBottom: 20 },
   label: { fontSize: 13, fontWeight: '700', color: '#1F1F1F', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
   input: { backgroundColor: '#F5F5F5', borderRadius: 14, padding: 16, fontSize: 16, color: '#1F1F1F', borderWidth: 1, borderColor: '#EEE' },
+  brandPreviewPill: {
+    marginTop: 10,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  brandPreviewText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4B5563',
+  },
   rowInputs: { flexDirection: 'row' },
   saveButton: { backgroundColor: '#1F1F1F', borderRadius: 16, paddingVertical: 18, alignItems: 'center' },
   saveButtonDisabled: { opacity: 0.3 },

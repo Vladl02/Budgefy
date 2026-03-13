@@ -6,14 +6,14 @@ import {
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { Text } from "@react-navigation/elements";
 import { useSQLiteContext } from "expo-sqlite";
-import { ChartPie, House, ScanLine, Scroll, Settings } from "lucide-react-native";
+import { ChartPie, Clock3, House, ScanLine, Settings } from "lucide-react-native";
 import { useCallback, useRef } from "react";
 import { Alert, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const ICONS_BY_ROUTE = {
   index: House,
-  reports: Scroll,
+  reports: Clock3,
   scan: ScanLine,
   overview: ChartPie,
   settings: Settings,

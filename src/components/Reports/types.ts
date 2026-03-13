@@ -12,4 +12,7 @@ export interface ReceiptItem {
   fullPage: boolean;
   receiptPhotoUri?: string | null;
   status: ReceiptStatus;
+  sourceType?: string;
+  categoryIconName?: string | null;
+  categoryColor?: string | null;
 }
