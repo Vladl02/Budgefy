@@ -8,11 +8,9 @@
     "icon": "./assets/images/icon.png",
     "scheme": "ap",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.anonymous.AP",
-      "newArchEnabled": true,
       "infoPlist": {
         "NSCameraUsageDescription": "We need camera access so you can scan receipts."
       }
@@ -25,8 +23,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.AP",
-      "newArchEnabled": true
+      "package": "com.anonymous.AP"
     },
     "web": {
       "output": "static",
