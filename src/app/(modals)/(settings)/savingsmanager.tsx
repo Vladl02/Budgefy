@@ -25,7 +25,9 @@ import {
 import { Swipeable } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { useNavigation } from "@react-navigation/native";
 import { SlidingSheet } from "@/src/components/SlidingSheet";
+import { useAppTheme } from "@/src/providers/AppThemeProvider";
 
 type GoalIconName = "shield" | "target" | "trend" | "piggy";
 
@@ -110,8 +112,10 @@ const withAlpha = (hex: string, alpha: number): string => {
 };
 
 export default function SavingsManager() {
+  const { isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const navigation = useNavigation();
   const [goals, setGoals] = useState<Goal[]>(INITIAL_GOALS);
   const [isAddModalVisible, setAddModalVisible] = useState(false);
   const [newGoalName, setNewGoalName] = useState("");
@@ -176,7 +180,16 @@ export default function SavingsManager() {
   );
 
   const handleDismiss = () => {
-    router.back();
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+    const parent = navigation.getParent();
+    if (parent?.canGoBack()) {
+      parent.goBack();
+      return;
+    }
+    router.replace("/(tabs)/settings");
   };
 
   const handleCreateGoal = () => {
@@ -312,10 +325,20 @@ export default function SavingsManager() {
 
   return (
     <View style={styles.screenWrapper}>
-      <SlidingSheet onDismiss={handleDismiss} heightPercent={0.86} backdropOpacity={0.42}>
+      <SlidingSheet
+        onDismiss={handleDismiss}
+        heightPercent={0.86}
+        backdropOpacity={0.42}
+        sheetStyle={isDark ? styles.sheetContainerDark : undefined}
+        handleStyle={isDark ? styles.sheetHandleDark : undefined}
+      >
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 24 }]}
+          contentContainerStyle={[
+            styles.scrollContent,
+            isDark ? styles.scrollContentDark : null,
+            { paddingBottom: insets.bottom + 24 },
+          ]}
         >
           <View style={styles.heroCard}>
             <View pointerEvents="none" style={styles.heroParticlesLayer}>
@@ -388,8 +411,10 @@ export default function SavingsManager() {
           </View>
 
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Savings Goals</Text>
-            <Text style={styles.sectionSubtitle}>Tap a goal to manage deposits and withdrawals</Text>
+            <Text style={[styles.sectionTitle, isDark ? styles.sectionTitleDark : null]}>Savings Goals</Text>
+            <Text style={[styles.sectionSubtitle, isDark ? styles.sectionSubtitleDark : null]}>
+              Tap a goal to manage deposits and withdrawals
+            </Text>
           </View>
 
           {goals.map((goal) => {
@@ -399,7 +424,12 @@ export default function SavingsManager() {
 
             const goalCard = (
               <Pressable
-                style={[styles.goalCard, isCompleted ? styles.goalCardCompleted : null]}
+                style={[
+                  styles.goalCard,
+                  isDark ? styles.goalCardDark : null,
+                  isCompleted ? styles.goalCardCompleted : null,
+                  isDark && isCompleted ? styles.goalCardCompletedDark : null,
+                ]}
                 onPress={isCompleted ? undefined : () => setSelectedGoal(goal)}
                 disabled={isCompleted}
               >
@@ -408,29 +438,49 @@ export default function SavingsManager() {
                     {renderIcon(goal.iconName, goal.color)}
                   </View>
                   <View style={styles.goalTitleWrap}>
-                    <Text style={styles.goalName} numberOfLines={1}>
+                    <Text style={[styles.goalName, isDark ? styles.goalNameDark : null]} numberOfLines={1}>
                       {goal.name}
                     </Text>
-                    <Text style={styles.goalSubtext}>
+                    <Text style={[styles.goalSubtext, isDark ? styles.goalSubtextDark : null]}>
                       {formatAmount(goal.current)} saved of {formatAmount(goal.target)}
                     </Text>
                   </View>
-                  <View style={[styles.goalPercentPill, isCompleted ? styles.goalPercentPillCompleted : null]}>
-                    <Text style={[styles.goalPercentText, isCompleted ? styles.goalPercentTextCompleted : null]}>
+                  <View
+                    style={[
+                      styles.goalPercentPill,
+                      isDark ? styles.goalPercentPillDark : null,
+                      isCompleted ? styles.goalPercentPillCompleted : null,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.goalPercentText,
+                        isDark ? styles.goalPercentTextDark : null,
+                        isCompleted ? styles.goalPercentTextCompleted : null,
+                        isDark && isCompleted ? styles.goalPercentTextCompletedDark : null,
+                      ]}
+                    >
                       {isCompleted ? "Reached" : `${Math.round(progress)}%`}
                     </Text>
                   </View>
                 </View>
 
-                <View style={styles.progressTrack}>
+                <View style={[styles.progressTrack, isDark ? styles.progressTrackDark : null]}>
                   <View style={[styles.progressFill, { width: `${progress}%`, backgroundColor: goal.color }]} />
                 </View>
 
                 <View style={styles.goalBottomRow}>
-                  <Text style={styles.goalRemainingText}>
+                  <Text style={[styles.goalRemainingText, isDark ? styles.goalRemainingTextDark : null]}>
                     {isCompleted ? "Goal completed" : `Remaining ${formatAmount(remaining)}`}
                   </Text>
-                  <Text style={[styles.goalManageHint, isCompleted ? styles.goalManageHintCompleted : null]}>
+                  <Text
+                    style={[
+                      styles.goalManageHint,
+                      isDark ? styles.goalManageHintDark : null,
+                      isCompleted ? styles.goalManageHintCompleted : null,
+                      isDark && isCompleted ? styles.goalManageHintCompletedDark : null,
+                    ]}
+                  >
                     {isCompleted ? "Swipe left to archive" : "Manage"}
                   </Text>
                 </View>
@@ -475,8 +525,10 @@ export default function SavingsManager() {
 
           {goals.length === 0 ? (
             <View style={styles.emptyGoalsState}>
-              <Text style={styles.emptyGoalsTitle}>No active goals</Text>
-              <Text style={styles.emptyGoalsSubtitle}>Create a goal to start tracking your savings progress.</Text>
+              <Text style={[styles.emptyGoalsTitle, isDark ? styles.emptyGoalsTitleDark : null]}>No active goals</Text>
+              <Text style={[styles.emptyGoalsSubtitle, isDark ? styles.emptyGoalsSubtitleDark : null]}>
+                Create a goal to start tracking your savings progress.
+              </Text>
             </View>
           ) : null}
 
@@ -493,29 +545,33 @@ export default function SavingsManager() {
           onRequestClose={() => setCompletedModalVisible(false)}
         >
           <Pressable style={styles.modalOverlay} onPress={() => setCompletedModalVisible(false)}>
-            <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
+            <View style={[styles.modalCard, isDark ? styles.modalCardDark : null]} onStartShouldSetResponder={() => true}>
               <View style={styles.modalHeader}>
                 <View style={styles.modalTitleWrap}>
-                  <Text style={styles.modalTitle}>Completed Goals</Text>
-                  <Text style={styles.modalSubtitle}>Reached goals can be archived with a left swipe.</Text>
+                  <Text style={[styles.modalTitle, isDark ? styles.modalTitleDark : null]}>Completed Goals</Text>
+                  <Text style={[styles.modalSubtitle, isDark ? styles.modalSubtitleDark : null]}>
+                    Reached goals can be archived with a left swipe.
+                  </Text>
                 </View>
                 <Pressable onPress={() => setCompletedModalVisible(false)} hitSlop={8}>
-                  <X size={22} color="#6B7280" />
+                  <X size={22} color={isDark ? "#9CA3AF" : "#6B7280"} />
                 </Pressable>
               </View>
               <ScrollView style={styles.completedList} showsVerticalScrollIndicator={false}>
                 {completedGoalRecords.length === 0 ? (
-                  <Text style={styles.emptyCompletedText}>No completed goals yet.</Text>
+                  <Text style={[styles.emptyCompletedText, isDark ? styles.emptyCompletedTextDark : null]}>
+                    No completed goals yet.
+                  </Text>
                 ) : (
                   completedGoalRecords.map((goal) => (
-                    <View key={`completed-${goal.id}`} style={styles.completedItem}>
+                    <View key={`completed-${goal.id}`} style={[styles.completedItem, isDark ? styles.completedItemDark : null]}>
                       <View style={styles.completedItemTextWrap}>
-                        <Text style={styles.completedItemName}>{goal.name}</Text>
-                        <Text style={styles.completedItemSub}>
+                        <Text style={[styles.completedItemName, isDark ? styles.completedItemNameDark : null]}>{goal.name}</Text>
+                        <Text style={[styles.completedItemSub, isDark ? styles.completedItemSubDark : null]}>
                           {formatAmount(goal.current)} of {formatAmount(goal.target)}
                         </Text>
                         {goal.archivedAt ? (
-                          <Text style={styles.completedArchivedAt}>
+                          <Text style={[styles.completedArchivedAt, isDark ? styles.completedArchivedAtDark : null]}>
                             Archived{" "}
                             {new Date(goal.archivedAt).toLocaleDateString("en-US", {
                               month: "short",
@@ -529,12 +585,14 @@ export default function SavingsManager() {
                         style={[
                           styles.completedBadge,
                           goal.isArchived ? styles.completedBadgeArchived : styles.completedBadgeActive,
+                          isDark && goal.isArchived ? styles.completedBadgeArchivedDark : null,
                         ]}
                       >
                         <Text
                           style={[
                             styles.completedBadgeText,
                             goal.isArchived ? styles.completedBadgeTextArchived : styles.completedBadgeTextActive,
+                            isDark && goal.isArchived ? styles.completedBadgeTextArchivedDark : null,
                           ]}
                         >
                           {goal.isArchived ? "Archived" : "Active"}
@@ -551,26 +609,26 @@ export default function SavingsManager() {
         <Modal visible={isAddModalVisible} animationType="fade" transparent onRequestClose={() => setAddModalVisible(false)}>
           <Pressable style={styles.modalOverlay} onPress={() => setAddModalVisible(false)}>
             <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalKeyboardWrap}>
-              <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
+              <View style={[styles.modalCard, isDark ? styles.modalCardDark : null]} onStartShouldSetResponder={() => true}>
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>New Savings Goal</Text>
+                <Text style={[styles.modalTitle, isDark ? styles.modalTitleDark : null]}>New Savings Goal</Text>
                 <Pressable onPress={() => setAddModalVisible(false)} hitSlop={8}>
-                  <X size={22} color="#6B7280" />
+                  <X size={22} color={isDark ? "#9CA3AF" : "#6B7280"} />
                 </Pressable>
               </View>
 
-              <Text style={styles.inputLabel}>Goal Name</Text>
+              <Text style={[styles.inputLabel, isDark ? styles.inputLabelDark : null]}>Goal Name</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, isDark ? styles.inputDark : null]}
                 placeholder="e.g. Europe Trip"
                 placeholderTextColor="#9CA3AF"
                 value={newGoalName}
                 onChangeText={setNewGoalName}
               />
 
-              <Text style={styles.inputLabel}>Target Amount</Text>
+              <Text style={[styles.inputLabel, isDark ? styles.inputLabelDark : null]}>Target Amount</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, isDark ? styles.inputDark : null]}
                 placeholder="10000"
                 placeholderTextColor="#9CA3AF"
                 keyboardType="decimal-pad"
@@ -589,21 +647,23 @@ export default function SavingsManager() {
         <Modal visible={!!selectedGoal} animationType="fade" transparent onRequestClose={closeManageModal}>
           <Pressable style={styles.modalOverlay} onPress={closeManageModal}>
             <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalKeyboardWrap}>
-              <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
+              <View style={[styles.modalCard, isDark ? styles.modalCardDark : null]} onStartShouldSetResponder={() => true}>
               <View style={styles.modalHeader}>
                 <View style={styles.modalTitleWrap}>
-                  <Text style={styles.modalTitle}>{selectedGoal?.name}</Text>
-                  <Text style={styles.modalSubtitle}>Current balance {formatAmount(selectedGoal?.current ?? 0)}</Text>
+                  <Text style={[styles.modalTitle, isDark ? styles.modalTitleDark : null]}>{selectedGoal?.name}</Text>
+                  <Text style={[styles.modalSubtitle, isDark ? styles.modalSubtitleDark : null]}>
+                    Current balance {formatAmount(selectedGoal?.current ?? 0)}
+                  </Text>
                 </View>
                 <Pressable onPress={closeManageModal} hitSlop={8}>
-                  <X size={22} color="#6B7280" />
+                  <X size={22} color={isDark ? "#9CA3AF" : "#6B7280"} />
                 </Pressable>
               </View>
 
-              <View style={styles.moneyInputWrap}>
-                <Text style={styles.moneyPrefix}>$</Text>
+              <View style={[styles.moneyInputWrap, isDark ? styles.moneyInputWrapDark : null]}>
+                <Text style={[styles.moneyPrefix, isDark ? styles.moneyPrefixDark : null]}>$</Text>
                 <TextInput
-                  style={styles.moneyInput}
+                  style={[styles.moneyInput, isDark ? styles.moneyInputDark : null]}
                   placeholder="0"
                   placeholderTextColor="#D1D5DB"
                   keyboardType="decimal-pad"
@@ -614,7 +674,10 @@ export default function SavingsManager() {
               </View>
 
               <View style={styles.actionRow}>
-                <Pressable style={[styles.actionButton, styles.withdrawButton]} onPress={() => handleUpdateFunds("withdraw")}>
+                <Pressable
+                  style={[styles.actionButton, styles.withdrawButton, isDark ? styles.withdrawButtonDark : null]}
+                  onPress={() => handleUpdateFunds("withdraw")}
+                >
                   <Minus size={18} color="#DC2626" />
                   <Text style={styles.withdrawText}>Withdraw</Text>
                 </Pressable>
@@ -623,7 +686,7 @@ export default function SavingsManager() {
                   <Text style={styles.depositText}>Deposit</Text>
                 </Pressable>
               </View>
-              <Pressable style={styles.deleteGoalButton} onPress={handleDeleteGoal}>
+              <Pressable style={[styles.deleteGoalButton, isDark ? styles.deleteGoalButtonDark : null]} onPress={handleDeleteGoal}>
                 <Trash2 size={16} color="#DC2626" />
                 <Text style={styles.deleteGoalText}>Remove Goal</Text>
               </Pressable>
@@ -641,9 +704,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "transparent",
   },
+  sheetContainerDark: {
+    backgroundColor: "#1C1C1D",
+  },
+  sheetHandleDark: {
+    backgroundColor: "#9CA3AF",
+  },
   scrollContent: {
     paddingHorizontal: 14,
     paddingTop: 10,
+  },
+  scrollContentDark: {
+    backgroundColor: "#1C1C1D",
   },
   heroCard: {
     borderRadius: 20,
@@ -743,11 +815,17 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#111827",
   },
+  sectionTitleDark: {
+    color: "#F9FAFB",
+  },
   sectionSubtitle: {
     marginTop: 2,
     fontSize: 12,
     fontWeight: "500",
     color: "#6B7280",
+  },
+  sectionSubtitleDark: {
+    color: "#9CA3AF",
   },
   goalCard: {
     borderRadius: 18,
@@ -756,6 +834,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     paddingHorizontal: 12,
     paddingVertical: 12,
+  },
+  goalCardDark: {
+    borderColor: "#2E2E2E",
+    backgroundColor: "#1C1C1D",
   },
   goalListItem: {
     marginBottom: 10,
@@ -767,6 +849,10 @@ const styles = StyleSheet.create({
   goalCardCompleted: {
     borderColor: "rgba(34,197,94,0.42)",
     backgroundColor: "rgba(34,197,94,0.1)",
+  },
+  goalCardCompletedDark: {
+    borderColor: "rgba(34,197,94,0.5)",
+    backgroundColor: "rgba(34,197,94,0.14)",
   },
   goalTopRow: {
     flexDirection: "row",
@@ -788,11 +874,17 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#111827",
   },
+  goalNameDark: {
+    color: "#F3F4F6",
+  },
   goalSubtext: {
     marginTop: 2,
     fontSize: 12,
     fontWeight: "500",
     color: "#6B7280",
+  },
+  goalSubtextDark: {
+    color: "#9CA3AF",
   },
   goalPercentPill: {
     backgroundColor: "#111827",
@@ -810,8 +902,17 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
   },
+  goalPercentPillDark: {
+    backgroundColor: "#000000",
+  },
+  goalPercentTextDark: {
+    color: "#FFFFFF",
+  },
   goalPercentTextCompleted: {
     color: "#166534",
+  },
+  goalPercentTextCompletedDark: {
+    color: "#86EFAC",
   },
   progressTrack: {
     marginTop: 10,
@@ -819,6 +920,9 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: "#EEF2F7",
     overflow: "hidden",
+  },
+  progressTrackDark: {
+    backgroundColor: "#2E2E2E",
   },
   progressFill: {
     height: "100%",
@@ -835,13 +939,22 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#4B5563",
   },
+  goalRemainingTextDark: {
+    color: "#9CA3AF",
+  },
   goalManageHint: {
     fontSize: 12,
     fontWeight: "700",
     color: "#111827",
   },
+  goalManageHintDark: {
+    color: "#F3F4F6",
+  },
   goalManageHintCompleted: {
     color: "#166534",
+  },
+  goalManageHintCompletedDark: {
+    color: "#86EFAC",
   },
   archiveSwipeAction: {
     minWidth: 92,
@@ -873,6 +986,9 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#111827",
   },
+  emptyGoalsTitleDark: {
+    color: "#F3F4F6",
+  },
   emptyGoalsSubtitle: {
     marginTop: 4,
     fontSize: 12,
@@ -880,10 +996,13 @@ const styles = StyleSheet.create({
     color: "#6B7280",
     textAlign: "center",
   },
+  emptyGoalsSubtitleDark: {
+    color: "#9CA3AF",
+  },
   primaryCta: {
     marginTop: 6,
     borderRadius: 14,
-    backgroundColor: "#111827",
+    backgroundColor: "#FFFFFF",
     paddingVertical: 14,
     alignItems: "center",
     justifyContent: "center",
@@ -891,7 +1010,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   primaryCtaText: {
-    color: "#FFFFFF",
+    color: "#111111",
     fontSize: 15,
     fontWeight: "700",
   },
@@ -915,6 +1034,11 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
     overflow: "hidden",
   },
+  modalCardDark: {
+    backgroundColor: "#1C1C1D",
+    borderWidth: 1,
+    borderColor: "#2E2E2E",
+  },
   modalHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -930,11 +1054,17 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#111827",
   },
+  modalTitleDark: {
+    color: "#F9FAFB",
+  },
   modalSubtitle: {
     marginTop: 2,
     fontSize: 12,
     fontWeight: "500",
     color: "#6B7280",
+  },
+  modalSubtitleDark: {
+    color: "#9CA3AF",
   },
   completedList: {
     maxHeight: 320,
@@ -945,6 +1075,9 @@ const styles = StyleSheet.create({
     color: "#6B7280",
     textAlign: "center",
     paddingVertical: 18,
+  },
+  emptyCompletedTextDark: {
+    color: "#9CA3AF",
   },
   completedItem: {
     borderWidth: 1,
@@ -959,6 +1092,10 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 8,
   },
+  completedItemDark: {
+    borderColor: "#2E2E2E",
+    backgroundColor: "#1C1C1D",
+  },
   completedItemTextWrap: {
     flex: 1,
   },
@@ -967,16 +1104,25 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#111827",
   },
+  completedItemNameDark: {
+    color: "#F3F4F6",
+  },
   completedItemSub: {
     marginTop: 2,
     fontSize: 12,
     fontWeight: "500",
     color: "#6B7280",
   },
+  completedItemSubDark: {
+    color: "#9CA3AF",
+  },
   completedArchivedAt: {
     marginTop: 2,
     fontSize: 11,
     fontWeight: "500",
+    color: "#9CA3AF",
+  },
+  completedArchivedAtDark: {
     color: "#9CA3AF",
   },
   completedBadge: {
@@ -993,6 +1139,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#F3F4F6",
     borderColor: "#D1D5DB",
   },
+  completedBadgeArchivedDark: {
+    backgroundColor: "#111111",
+    borderColor: "#2E2E2E",
+  },
   completedBadgeText: {
     fontSize: 11,
     fontWeight: "700",
@@ -1003,6 +1153,9 @@ const styles = StyleSheet.create({
   completedBadgeTextArchived: {
     color: "#4B5563",
   },
+  completedBadgeTextArchivedDark: {
+    color: "#D1D5DB",
+  },
   inputLabel: {
     marginTop: 8,
     marginBottom: 6,
@@ -1011,6 +1164,9 @@ const styles = StyleSheet.create({
     color: "#4B5563",
     textTransform: "uppercase",
     letterSpacing: 0.5,
+  },
+  inputLabelDark: {
+    color: "#D1D5DB",
   },
   input: {
     borderRadius: 12,
@@ -1022,6 +1178,11 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     paddingHorizontal: 12,
     paddingVertical: 12,
+  },
+  inputDark: {
+    borderColor: "#2E2E2E",
+    backgroundColor: "#1C1C1D",
+    color: "#F3F4F6",
   },
   modalPrimaryButton: {
     marginTop: 14,
@@ -1048,11 +1209,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 14,
   },
+  moneyInputWrapDark: {
+    borderColor: "#2E2E2E",
+    backgroundColor: "#1C1C1D",
+  },
   moneyPrefix: {
     fontSize: 28,
     fontWeight: "700",
     color: "#111827",
     marginRight: 2,
+  },
+  moneyPrefixDark: {
+    color: "#F3F4F6",
   },
   moneyInput: {
     minWidth: 130,
@@ -1060,6 +1228,9 @@ const styles = StyleSheet.create({
     fontSize: 34,
     fontWeight: "800",
     color: "#111827",
+  },
+  moneyInputDark: {
+    color: "#F3F4F6",
   },
   actionRow: {
     marginTop: 14,
@@ -1077,6 +1248,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     flexDirection: "row",
     gap: 6,
+  },
+  deleteGoalButtonDark: {
+    borderColor: "rgba(220,38,38,0.42)",
+    backgroundColor: "rgba(220,38,38,0.12)",
   },
   deleteGoalText: {
     color: "#DC2626",
@@ -1096,6 +1271,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#FECACA",
     backgroundColor: "#FEF2F2",
+  },
+  withdrawButtonDark: {
+    borderColor: "rgba(220,38,38,0.45)",
+    backgroundColor: "rgba(220,38,38,0.12)",
   },
   depositButton: {
     borderWidth: 1,

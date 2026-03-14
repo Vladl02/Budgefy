@@ -465,15 +465,15 @@ export default function EditBudgetModal({ visible, onClose, initialItems, onSave
 const styles = StyleSheet.create({
   // Main container needs background
   modalContainer: { flex: 1, backgroundColor: THEME.background },
-  modalContainerDark: { backgroundColor: "#0B0F14" },
+  modalContainerDark: { backgroundColor: "#1C1C1D" },
   
   grabberBarContainer: { alignItems: 'center', paddingVertical: 12, backgroundColor: THEME.background },
-  grabberBarContainerDark: { backgroundColor: "#0B0F14" },
+  grabberBarContainerDark: { backgroundColor: "#1C1C1D" },
   grabberBar: { width: 40, height: 5, backgroundColor: THEME.borderColor, borderRadius: 3 },
   grabberBarDark: { backgroundColor: "#4B5563" },
   
   modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 24, paddingBottom: 20, backgroundColor: THEME.background },
-  modalHeaderDark: { backgroundColor: "#0B0F14" },
+  modalHeaderDark: { backgroundColor: "#1C1C1D" },
   modalTitle: { fontSize: 24, fontWeight: "800", color: THEME.textPrimary },
   modalTitleDark: { color: "#F3F4F6" },
   closeButton: { padding: 4, backgroundColor: THEME.secondaryBackground, borderRadius: 20 },
@@ -489,7 +489,7 @@ const styles = StyleSheet.create({
     shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 8, elevation: 1,
   },
   itemCardDark: {
-    backgroundColor: "#111827",
+    backgroundColor: "#1C1C1D",
     borderColor: "#374151",
   },
   itemCardEditing: { borderColor: THEME.primary, backgroundColor: THEME.secondaryBackground },
@@ -515,8 +515,8 @@ const styles = StyleSheet.create({
       justifyContent: 'center', backgroundColor: '#FAFAFA'
   },
   addCardDark: {
-      borderColor: "#374151",
-      backgroundColor: "#111827",
+      borderColor: "#6a6a6a",
+      backgroundColor: "#1C1C1D",
   },
   addIconWrapper: { marginRight: 8 },
   addCardText: { fontSize: 16, fontWeight: '600', color: THEME.textSecondary },
@@ -528,8 +528,8 @@ const styles = StyleSheet.create({
     paddingBottom: Platform.OS === 'ios' ? 24 : 24, // Reduced default padding since Animated View handles keyboard
   },
   bottomPanelDark: {
-    backgroundColor: "#0B0F14",
-    borderTopColor: "#374151",
+    backgroundColor: "#1C1C1D",
+    borderTopColor: "#1C1C1D",
   },
   
   panelHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
@@ -593,7 +593,7 @@ const styles = StyleSheet.create({
       margin: '1%', borderRadius: 12, borderWidth: 1, borderColor: 'transparent'
   },
   gridItemDark: {
-      backgroundColor: "#111827",
+      backgroundColor: "#1C1C1D",
       borderColor: "#374151",
   },
 });

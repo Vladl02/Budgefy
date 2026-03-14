@@ -961,6 +961,7 @@ export default function Reports() {
         <View style={[styles.groupCard, isDark ? styles.groupCardDark : null]}>
           {item.items.map((receipt, index) => {
             const statusConfig = STATUS_CONFIG[receipt.status] || STATUS_CONFIG.processed;
+            const shouldShowStatusBadge = receipt.status !== "processed";
             const transactionDateLabel = formatTransactionDateLabel(receipt.fullDate);
             const rowMetaText =
               receipt.status === "processing"
@@ -971,6 +972,15 @@ export default function Reports() {
             const isManualEntry = receipt.sourceType === "manual";
             const categoryColor = receipt.categoryColor ?? "#8E8E93";
             const categoryIconBg = withAlpha(categoryColor, isDark ? 0.22 : 0.14);
+            const manualIconGlowStyle = isManualEntry
+              ? {
+                  shadowColor: categoryColor,
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowOpacity: isDark ? 0.7 : 0.7,
+                  shadowRadius: 10,
+                  elevation: 4,
+                }
+              : null;
             const CategoryIcon = resolveCategoryIcon(receipt.categoryIconName, receipt.category);
 
             return (
@@ -1004,6 +1014,7 @@ export default function Reports() {
                           styles.groupIconContainer,
                           isDark ? styles.groupIconContainerDark : null,
                           isManualEntry ? { backgroundColor: categoryIconBg, borderColor: withAlpha(categoryColor, 0.45), borderWidth: 1 } : null,
+                          manualIconGlowStyle,
                         ]}
                       >
                         {isManualEntry ? (
@@ -1026,10 +1037,12 @@ export default function Reports() {
 
                       <View style={styles.groupRightColumn}>
                         <Text style={[styles.groupAmountText, isDark ? styles.groupAmountTextDark : null]}>{receipt.amount}</Text>
-                        <View style={[styles.groupStatusPill, { backgroundColor: statusConfig.bg }]}>
-                          <View style={[styles.groupStatusDot, { backgroundColor: statusConfig.color }]} />
-                          <Text style={[styles.groupStatusText, { color: statusConfig.color }]}>{statusConfig.label}</Text>
-                        </View>
+                        {shouldShowStatusBadge ? (
+                          <View style={[styles.groupStatusPill, { backgroundColor: statusConfig.bg }]}>
+                            <View style={[styles.groupStatusDot, { backgroundColor: statusConfig.color }]} />
+                            <Text style={[styles.groupStatusText, { color: statusConfig.color }]}>{statusConfig.label}</Text>
+                          </View>
+                        ) : null}
                       </View>
                       <ChevronRight size={14} color={isDark ? "#6B7280" : "#B8BDC7"} style={styles.groupChevron} />
                     </View>
@@ -1316,8 +1329,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   headerBadgeDark: {
-    backgroundColor: "#050505",
-    borderColor: "#262626",
+    backgroundColor: "#1C1C1D",
+    borderColor: "#2E2E2E",
   },
   headerBadgeDot: {
     width: 8,
@@ -1343,6 +1356,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderRadius: 24,
     padding: 24,
+    paddingBottom:10,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
@@ -1353,9 +1367,9 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   summaryCardDark: {
-    backgroundColor: "#050505",
+    backgroundColor: "#1C1C1D",
     borderWidth: 1,
-    borderColor: "#262626",
+    borderColor: "#2E2E2E",
   },
   summaryMain: {
     flex: 1,
@@ -1363,11 +1377,12 @@ const styles = StyleSheet.create({
     marginRight: 10,
     marginLeft: -8,
   },
-  summaryLabel: { fontSize: 14, color: "#8E8E93", fontWeight: "600", marginBottom: 6 },
+  summaryLabel: { fontSize: 14, color: "#8E8E93", fontWeight: "600", marginTop: 4, marginBottom: 1 },
   summaryLabelDark: { color: "#9CA3AF" },
   summaryAmountRow: {
     flexDirection: "row",
     alignItems: "center",
+    marginTop: 10,
   },
   summaryAmountCurrency: {
     fontSize: 28,
@@ -1414,8 +1429,8 @@ const styles = StyleSheet.create({
     borderColor: "rgba(0,0,0,0.06)",
     maxWidth: "52%",
     flexShrink: 1,
-    marginTop: -8,
-    marginRight: -12,
+    marginTop: -10,
+    marginRight: -10,
   },
   trendText: { color: "#34C759", fontWeight: "700", fontSize: 13, marginLeft: 4, flexShrink: 1 },
 
@@ -1553,8 +1568,8 @@ const styles = StyleSheet.create({
     borderColor: "#F0F0F0",
   },
   searchBarDark: {
-    backgroundColor: "#050505",
-    borderColor: "#262626",
+    backgroundColor: "#1C1C1D",
+    borderColor: "#2E2E2E",
   },
   searchInput: { flex: 1, marginLeft: 8, fontSize: 16, color: "#1A1A1A" },
   searchInputDark: { color: "#F3F4F6" },
@@ -1585,8 +1600,8 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   groupCardDark: {
-    backgroundColor: "#050505",
-    borderColor: "#262626",
+    backgroundColor: "#1C1C1D",
+    borderColor: "#2E2E2E",
   },
   groupRowPressable: {
     paddingHorizontal: 16,
@@ -1607,7 +1622,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   groupIconContainerDark: {
-    backgroundColor: "#0D0D0D",
+    backgroundColor: "#1C1C1D",
   },
   groupTextColumn: {
     justifyContent: "center",
@@ -1672,7 +1687,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
   },
   groupRowDividerDark: {
-    backgroundColor: "#1A1A1A",
+    backgroundColor: "#2E2E2E",
   },
   deleteAction: {
     width: 72,

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
+import { useNavigation } from "@react-navigation/native";
 import { drizzle, useLiveQuery } from "drizzle-orm/expo-sqlite";
 import { useSQLiteContext } from "expo-sqlite";
 import { Sparkles } from "lucide-react-native";
@@ -17,6 +18,7 @@ import { useBudgetStore } from "@/src/stores/budgetStore";
 export default function BudgetSheet() {
   const { isDark } = useAppTheme();
   const router = useRouter();
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const dbExpo = useSQLiteContext();
   const db = useMemo(() => drizzle(dbExpo), [dbExpo]);
@@ -67,7 +69,18 @@ export default function BudgetSheet() {
     if (items.length === 0) return null;
     return [...items].sort((a, b) => (b.spent ?? 0) - (a.spent ?? 0))[0];
   }, [items]);
-  const handleDismiss = () => router.back();
+  const handleDismiss = () => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+    const parent = navigation.getParent();
+    if (parent?.canGoBack()) {
+      parent.goBack();
+      return;
+    }
+    router.replace("/(tabs)/settings");
+  };
   const handleSaveBudget = (newItems: SummaryItem[]) => {
     const nextOverrides = newItems.reduce<Record<string, number>>((acc, item) => {
       if (item.budget > 0) {

@@ -1,9 +1,23 @@
 import { categoriesForMonth, paymentSumsByCategoryForMonth } from "@/src/utils/queries";
 import { drizzle, useLiveQuery } from "drizzle-orm/expo-sqlite";
+import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
-import React, { useMemo, useState } from "react";
-import { Alert, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import React, { useCallback, useMemo, useRef, useState } from "react";
+import {
+  Alert,
+  FlatList,
+  Modal,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // Components
@@ -13,15 +27,15 @@ import CategoryCard, {
 } from "@/src/components/overview/category";
 import MonthlySummaryCard from "@/src/components/overview/donutCard";
 import EditBudgetModal, { SummaryItem } from "@/src/components/overview/EditBudgetModal";
-import { SafeArea } from "@/src/components/SafeArea";
 import { useAppTheme } from "@/src/providers/AppThemeProvider";
 import { useBudgetStore } from "@/src/stores/budgetStore";
 
-type SortMode = "budget" | "spent" | "alphabetical";
+type SortMode = "budget" | "spent" | "remaining" | "alphabetical";
 
 const SORT_OPTIONS: { key: SortMode; label: string }[] = [
   { key: "budget", label: "Most Budget" },
   { key: "spent", label: "Most Spent" },
+  { key: "remaining", label: "Remaining" },
   { key: "alphabetical", label: "A-Z" },
 ];
 
@@ -34,6 +48,12 @@ export default function Overview() {
   const [isEditModalVisible, setEditModalVisible] = useState(false);
   const [quickBudgetTarget, setQuickBudgetTarget] = useState<SummaryItem | null>(null);
   const [quickBudgetInput, setQuickBudgetInput] = useState("");
+  const [showTopScrollBlur, setShowTopScrollBlur] = useState(false);
+  const [showBottomScrollBlur, setShowBottomScrollBlur] = useState(false);
+  const listViewportHeightRef = useRef(0);
+  const listContentHeightRef = useRef(0);
+  const topBlurVisibleRef = useRef(false);
+  const bottomBlurVisibleRef = useRef(false);
   const dbExpo = useSQLiteContext();
   const db = useMemo(() => drizzle(dbExpo), [dbExpo]);
   const currentMonth = useMemo(
@@ -108,6 +128,12 @@ export default function Overview() {
     clearCategoryBudget(quickBudgetTarget.id);
     closeQuickBudget();
   };
+  const quickBudgetInputNormalized = quickBudgetInput.trim().replace(",", ".");
+  const quickBudgetParsed = Number.parseFloat(quickBudgetInputNormalized);
+  const hasValidQuickBudget = Number.isFinite(quickBudgetParsed) && quickBudgetParsed > 0;
+  const currentQuickBudget = quickBudgetTarget ? Number((budgetOverrides[quickBudgetTarget.id] ?? 0).toFixed(2)) : 0;
+  const nextQuickBudget = hasValidQuickBudget ? Number(quickBudgetParsed.toFixed(2)) : null;
+  const canSaveQuickBudget = !!quickBudgetTarget && nextQuickBudget !== null && nextQuickBudget !== currentQuickBudget;
   const openCategoryDetails = (item: SummaryItem) => {
     router.push({
       pathname: "/category/[categoryId]",
@@ -119,10 +145,20 @@ export default function Overview() {
   };
 
   const listBottomPadding = useMemo(() => insets.bottom + 92, [insets.bottom]);
+  const listTopPadding = useMemo(() => insets.top + 12, [insets.top]);
   const sortedItems = useMemo(() => {
     const next = [...items];
     if (sortMode === "budget") {
       return next.sort((a, b) => b.budget - a.budget || b.spent - a.spent || a.title.localeCompare(b.title));
+    }
+    if (sortMode === "remaining") {
+      return next.sort(
+        (a, b) =>
+          (b.budget - b.spent) - (a.budget - a.spent) ||
+          b.budget - a.budget ||
+          b.spent - a.spent ||
+          a.title.localeCompare(b.title),
+      );
     }
     if (sortMode === "alphabetical") {
       return next.sort((a, b) => a.title.localeCompare(b.title));
@@ -160,14 +196,63 @@ export default function Overview() {
     () => new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate(),
     [currentMonth],
   );
+  const updateScrollEdgeBlur = useCallback((offsetY: number) => {
+    const viewportHeight = listViewportHeightRef.current;
+    const contentHeight = listContentHeightRef.current;
+    if (viewportHeight <= 0 || contentHeight <= 0) {
+      if (topBlurVisibleRef.current) {
+        topBlurVisibleRef.current = false;
+        setShowTopScrollBlur(false);
+      }
+      if (bottomBlurVisibleRef.current) {
+        bottomBlurVisibleRef.current = false;
+        setShowBottomScrollBlur(false);
+      }
+      return;
+    }
+
+    const canScroll = contentHeight - viewportHeight > 8;
+    const topVisible = canScroll && offsetY > 3;
+    const remaining = contentHeight - (offsetY + viewportHeight);
+    const bottomVisible = canScroll && remaining > 3;
+
+    if (topBlurVisibleRef.current !== topVisible) {
+      topBlurVisibleRef.current = topVisible;
+      setShowTopScrollBlur(topVisible);
+    }
+    if (bottomBlurVisibleRef.current !== bottomVisible) {
+      bottomBlurVisibleRef.current = bottomVisible;
+      setShowBottomScrollBlur(bottomVisible);
+    }
+  }, []);
+  const handleListLayout = useCallback((height: number) => {
+    if (listViewportHeightRef.current === height) return;
+    listViewportHeightRef.current = height;
+    updateScrollEdgeBlur(0);
+  }, [updateScrollEdgeBlur]);
+  const handleListContentSizeChange = useCallback((height: number) => {
+    if (listContentHeightRef.current === height) return;
+    listContentHeightRef.current = height;
+    updateScrollEdgeBlur(0);
+  }, [updateScrollEdgeBlur]);
+  const handleListScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      updateScrollEdgeBlur(event.nativeEvent.contentOffset.y);
+    },
+    [updateScrollEdgeBlur],
+  );
 
   return (
-    <SafeArea style={[styles.safeArea, isDark ? styles.safeAreaDark : null]}>
+    <View style={[styles.screen, isDark ? styles.screenDark : null]}>
       <FlatList
         data={sortedItems}
         keyExtractor={(item) => item.id}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.content, { paddingBottom: listBottomPadding }]}
+        contentContainerStyle={[styles.content, { paddingTop: listTopPadding, paddingBottom: listBottomPadding }]}
+        onLayout={(event) => handleListLayout(event.nativeEvent.layout.height)}
+        onContentSizeChange={(_width, height) => handleListContentSizeChange(height)}
+        onScroll={handleListScroll}
+        scrollEventThrottle={16}
 
         // Render List Items
         renderItem={({ item }) => (
@@ -195,12 +280,14 @@ export default function Overview() {
         // Render Header (Summary + Donut)
         ListHeaderComponent={
           <View style={styles.header}>
-            <View style={styles.heroCard}>
+            <View style={[styles.heroCard, isDark ? styles.heroCardDark : null]}>
               <View style={styles.heroTopRow}>
                 <View>
-                  <Text style={styles.heroEyebrow}>Overview</Text>
-                  <Text style={styles.heroTitle}>Budget Snapshot</Text>
-                  <Text style={styles.heroSubtitle}>Track your monthly budget performance</Text>
+                  <Text style={[styles.heroEyebrow, isDark ? styles.heroEyebrowDark : null]}>Overview</Text>
+                  <Text style={[styles.heroTitle, isDark ? styles.heroTitleDark : null]}>Budget Snapshot</Text>
+                  <Text style={[styles.heroSubtitle, isDark ? styles.heroSubtitleDark : null]}>
+                    Track your monthly budget performance
+                  </Text>
                 </View>
                 <View style={styles.monthPill}>
                   <Text style={styles.monthPillText}>{thisMonthLabel}</Text>
@@ -208,26 +295,30 @@ export default function Overview() {
               </View>
 
               <View style={styles.metricRow}>
-                <View style={styles.metricCard}>
-                  <Text style={styles.metricLabel}>Spent</Text>
-                  <Text style={styles.metricValue}>${totalSpent.toFixed(2)}</Text>
+                <View style={[styles.metricCard, isDark ? styles.metricCardDark : null]}>
+                  <Text style={[styles.metricLabel, isDark ? styles.metricLabelDark : null]}>Spent</Text>
+                  <Text style={[styles.metricValue, isDark ? styles.metricValueDark : null]}>${totalSpent.toFixed(2)}</Text>
                 </View>
-                <View style={styles.metricCard}>
-                  <Text style={styles.metricLabel}>Remaining</Text>
-                  <Text style={styles.metricValue}>${remainingBudget.toFixed(2)}</Text>
+                <View style={[styles.metricCard, isDark ? styles.metricCardDark : null]}>
+                  <Text style={[styles.metricLabel, isDark ? styles.metricLabelDark : null]}>Remaining</Text>
+                  <Text style={[styles.metricValue, isDark ? styles.metricValueDark : null]}>
+                    ${remainingBudget.toFixed(2)}
+                  </Text>
                 </View>
               </View>
 
               <View style={styles.progressWrap}>
-                <View style={styles.progressTrack}>
+                <View style={[styles.progressTrack, isDark ? styles.progressTrackDark : null]}>
                   <View style={[styles.progressFill, { width: `${spendRatio * 100}%` }]} />
                 </View>
-                <Text style={styles.progressText}>{Math.round(spendRatio * 100)}% of monthly budget used</Text>
+                <Text style={[styles.progressText, isDark ? styles.progressTextDark : null]}>
+                  {Math.round(spendRatio * 100)}% of monthly budget used
+                </Text>
               </View>
 
-              <View style={styles.topCategoryRow}>
-                <Text style={styles.topCategoryLabel}>Top category</Text>
-                <Text style={styles.topCategoryValue}>
+              <View style={[styles.topCategoryRow, isDark ? styles.topCategoryRowDark : null]}>
+                <Text style={[styles.topCategoryLabel, isDark ? styles.topCategoryLabelDark : null]}>Top category</Text>
+                <Text style={[styles.topCategoryValue, isDark ? styles.topCategoryValueDark : null]}>
                   {topSpendingCategory ? `${topSpendingCategory.title} - $${topSpendingCategory.spent.toFixed(2)}` : "No data"}
                 </Text>
               </View>
@@ -245,7 +336,12 @@ export default function Overview() {
               <Text style={[styles.sectionSubtitle, isDark ? styles.sectionSubtitleDark : null]}>
                 Detailed allocation by budget bucket
               </Text>
-              <View style={styles.sortRow}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.sortRow}
+                contentContainerStyle={styles.sortRowContent}
+              >
                 {SORT_OPTIONS.map((option) => {
                   const isActive = sortMode === option.key;
                   return (
@@ -271,10 +367,28 @@ export default function Overview() {
                     </Pressable>
                   );
                 })}
-              </View>
+              </ScrollView>
             </View>
           </View>
         }
+      />
+      <LinearGradient
+        pointerEvents="none"
+        colors={
+          isDark
+            ? ["rgba(0,0,0,0.9)", "rgba(0,0,0,0)"]
+            : ["rgba(246,247,251,0.96)", "rgba(246,247,251,0)"]
+        }
+        style={[styles.scrollBlurTop, !showTopScrollBlur ? styles.scrollBlurHidden : null]}
+      />
+      <LinearGradient
+        pointerEvents="none"
+        colors={
+          isDark
+            ? ["rgba(0,0,0,0)", "rgba(0,0,0,0.9)"]
+            : ["rgba(246,247,251,0)", "rgba(246,247,251,0.96)"]
+        }
+        style={[styles.scrollBlurBottom, !showBottomScrollBlur ? styles.scrollBlurHidden : null]}
       />
 
       <EditBudgetModal
@@ -306,11 +420,32 @@ export default function Overview() {
             </View>
 
             <View style={styles.quickBudgetActions}>
-              <TouchableOpacity style={[styles.quickBudgetGhostBtn, isDark ? styles.quickBudgetGhostBtnDark : null]} onPress={closeQuickBudget}>
-                <Text style={[styles.quickBudgetGhostText, isDark ? styles.quickBudgetGhostTextDark : null]}>Cancel</Text>
+              <TouchableOpacity
+                style={[
+                  styles.quickBudgetGhostBtn,
+                  isDark ? styles.quickBudgetGhostBtnDark : null,
+                  !canSaveQuickBudget ? styles.quickBudgetGhostBtnPrimary : null,
+                ]}
+                onPress={closeQuickBudget}
+              >
+                <Text
+                  style={[
+                    styles.quickBudgetGhostText,
+                    isDark ? styles.quickBudgetGhostTextDark : null,
+                    !canSaveQuickBudget ? styles.quickBudgetGhostTextPrimary : null,
+                  ]}
+                >
+                  Cancel
+                </Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.quickBudgetPrimaryBtn} onPress={saveQuickBudget}>
-                <Text style={styles.quickBudgetPrimaryText}>Save</Text>
+              <TouchableOpacity
+                style={[styles.quickBudgetPrimaryBtn, !canSaveQuickBudget ? styles.quickBudgetPrimaryBtnDisabled : null]}
+                onPress={saveQuickBudget}
+                disabled={!canSaveQuickBudget}
+              >
+                <Text style={[styles.quickBudgetPrimaryText, !canSaveQuickBudget ? styles.quickBudgetPrimaryTextDisabled : null]}>
+                  Save
+                </Text>
               </TouchableOpacity>
             </View>
 
@@ -322,19 +457,36 @@ export default function Overview() {
           </View>
         </Pressable>
       </Modal>
-    </SafeArea>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  screen: {
     backgroundColor: "#F6F7FB",
+    flex: 1,
   },
-  safeAreaDark: {
-    backgroundColor: "#0B0F14",
+  screenDark: {
+    backgroundColor: "#000000",
+  },
+  scrollBlurTop: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 100,
+  },
+  scrollBlurBottom: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 100,
+  },
+  scrollBlurHidden: {
+    opacity: 0,
   },
   content: {
-    paddingTop: 12,
     paddingBottom: 28,
   },
   header: {
@@ -355,8 +507,8 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   heroCardDark: {
-    backgroundColor: "#111827",
-    borderColor: "#374151",
+    backgroundColor: "#1C1C1D",
+    borderColor: "#000000",
   },
   heroTopRow: {
     flexDirection: "row",
@@ -394,7 +546,7 @@ const styles = StyleSheet.create({
     color: "#9CA3AF",
   },
   monthPill: {
-    backgroundColor: "#111827",
+    backgroundColor: "#1C1C1D",
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -419,8 +571,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   metricCardDark: {
-    backgroundColor: "#1F2937",
-    borderColor: "#374151",
+    backgroundColor: "#1C1C1D",
+    borderColor: "#565656",
   },
   metricLabel: {
     fontSize: 11,
@@ -448,10 +600,13 @@ const styles = StyleSheet.create({
     backgroundColor: "#E5E7EB",
     overflow: "hidden",
   },
+  progressTrackDark: {
+    backgroundColor: "#2f2f2f",
+  },
   progressFill: {
     height: "100%",
     borderRadius: 999,
-    backgroundColor: "#111827",
+    backgroundColor: "#ffffff",
   },
   progressText: {
     marginTop: 6,
@@ -514,9 +669,11 @@ const styles = StyleSheet.create({
   },
   sortRow: {
     marginTop: 10,
+  },
+  sortRowContent: {
     flexDirection: "row",
-    flexWrap: "wrap",
     gap: 8,
+    paddingRight: 8,
   },
   sortChip: {
     borderRadius: 999,
@@ -527,12 +684,13 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   sortChipDark: {
-    borderColor: "#374151",
-    backgroundColor: "#111827",
+    borderColor: "#404040",
+    backgroundColor: "#1C1C1D",
   },
   sortChipActive: {
-    backgroundColor: "#111827",
-    borderColor: "#111827",
+    backgroundColor: "#1C1C1D",
+    borderColor: "#FFFFFF",
+    borderWidth: 1.5,
   },
   sortChipPressed: {
     opacity: 0.84,
@@ -576,7 +734,7 @@ const styles = StyleSheet.create({
   },
   quickBudgetOverlay: {
     flex: 1,
-    backgroundColor: "rgba(15,23,42,0.35)",
+    backgroundColor: "rgba(0,0,0,0.55)",
     justifyContent: "center",
     paddingHorizontal: 22,
   },
@@ -589,8 +747,8 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   quickBudgetCardDark: {
-    backgroundColor: "#111827",
-    borderColor: "#374151",
+    backgroundColor: "#000000",
+    borderColor: "#2e2e2e",
   },
   quickBudgetTitle: {
     fontSize: 16,
@@ -622,7 +780,7 @@ const styles = StyleSheet.create({
   },
   quickBudgetInputWrapDark: {
     borderColor: "#4B5563",
-    backgroundColor: "#1F2937",
+    backgroundColor: "#000000",
   },
   quickBudgetCurrency: {
     fontSize: 18,
@@ -659,7 +817,7 @@ const styles = StyleSheet.create({
   },
   quickBudgetGhostBtnDark: {
     borderColor: "#4B5563",
-    backgroundColor: "#111827",
+    backgroundColor: "#000000",
   },
   quickBudgetGhostText: {
     color: "#374151",
@@ -669,18 +827,31 @@ const styles = StyleSheet.create({
   quickBudgetGhostTextDark: {
     color: "#E5E7EB",
   },
+  quickBudgetGhostBtnPrimary: {
+    backgroundColor: "#000000",
+    borderColor: "#000000",
+  },
+  quickBudgetGhostTextPrimary: {
+    color: "#FFFFFF",
+  },
   quickBudgetPrimaryBtn: {
     flex: 1,
     minHeight: 44,
     borderRadius: 10,
-    backgroundColor: "#111827",
+    backgroundColor: "#ffffff",
     alignItems: "center",
     justifyContent: "center",
   },
+  quickBudgetPrimaryBtnDisabled: {
+    backgroundColor: "#6B7280",
+  },
   quickBudgetPrimaryText: {
-    color: "#FFFFFF",
+    color: "#000000",
     fontSize: 14,
     fontWeight: "700",
+  },
+  quickBudgetPrimaryTextDisabled: {
+    color: "#E5E7EB",
   },
   quickBudgetClearBtn: {
     marginTop: 10,
@@ -693,4 +864,3 @@ const styles = StyleSheet.create({
     color: "#DC2626",
   },
 });
-
