@@ -1,5 +1,11 @@
 import { useAppTheme } from "@/src/providers/AppThemeProvider";
 import {
+  addProcessingReceipt,
+  markProcessingReceiptFailed,
+  removeProcessingReceipt,
+  setProcessingReceiptMessage,
+} from "@/src/stores/receiptProcessingStore";
+import {
   analyzeReceiptWithSupabase,
   scanReceiptImages,
 } from "@/src/utils/receiptScanner";
@@ -19,6 +25,12 @@ const ICONS_BY_ROUTE = {
   settings: Settings,
 } as const;
 
+const RECEIPT_PROGRESS_MESSAGES = [
+  "Fetching name...",
+  "Analyzing items...",
+  "Categorizing expenses...",
+  "Finalizing receipt...",
+] as const;
 
 export function MyTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const { isDark, appColors } = useAppTheme();
@@ -31,6 +43,16 @@ export function MyTabBar({ state, descriptors, navigation }: BottomTabBarProps) 
     if (scanLockRef.current) return;
 
     scanLockRef.current = true;
+    let processingReceiptId: string | null = null;
+    let progressInterval: ReturnType<typeof setInterval> | null = null;
+
+    const clearProgressInterval = () => {
+      if (progressInterval) {
+        clearInterval(progressInterval);
+        progressInterval = null;
+      }
+    };
+
     try {
       const scanResult = await scanReceiptImages();
 
@@ -51,12 +73,45 @@ export function MyTabBar({ state, descriptors, navigation }: BottomTabBarProps) 
       }
 
       if (scanResult.scannedImages.length > 0) {
-        await analyzeReceiptWithSupabase(db, scanResult.scannedImages[0]);
+        const scannedImage = scanResult.scannedImages[0];
+        processingReceiptId = addProcessingReceipt({
+          receiptPhotoUri: scannedImage,
+          message: RECEIPT_PROGRESS_MESSAGES[0],
+        });
+
+        let currentMessageIndex = 0;
+        progressInterval = setInterval(() => {
+          if (!processingReceiptId) return;
+          currentMessageIndex = Math.min(currentMessageIndex + 1, RECEIPT_PROGRESS_MESSAGES.length - 1);
+          setProcessingReceiptMessage(processingReceiptId, RECEIPT_PROGRESS_MESSAGES[currentMessageIndex]);
+        }, 1400);
+
+        const analyzeResult = await analyzeReceiptWithSupabase(db, scannedImage);
+        clearProgressInterval();
+
+        if (analyzeResult.status === "saved") {
+          setProcessingReceiptMessage(processingReceiptId, "Done");
+          const idToRemove = processingReceiptId;
+          setTimeout(() => removeProcessingReceipt(idToRemove), 500);
+          processingReceiptId = null;
+        } else {
+          markProcessingReceiptFailed(processingReceiptId, "Could not analyze this receipt. Please try again.");
+          const idToRemove = processingReceiptId;
+          setTimeout(() => removeProcessingReceipt(idToRemove), 4500);
+          processingReceiptId = null;
+        }
       }
     } catch (error) {
       console.error("Failed to scan receipt from tab shortcut:", error);
+      if (processingReceiptId) {
+        clearProgressInterval();
+        markProcessingReceiptFailed(processingReceiptId, "Scan failed. Could not process this receipt.");
+        const idToRemove = processingReceiptId;
+        setTimeout(() => removeProcessingReceipt(idToRemove), 4500);
+      }
       Alert.alert("Scan failed", "Could not open/save scanner result.");
     } finally {
+      clearProgressInterval();
       scanLockRef.current = false;
     }
   }, [db]);

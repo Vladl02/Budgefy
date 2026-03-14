@@ -1,11 +1,14 @@
 import React from "react";
 import { Nunito_900Black } from "@expo-google-fonts/nunito";
 import { useFonts } from "expo-font";
-import { Animated, Image, Modal, PanResponder, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Image as ExpoImage } from "expo-image";
+import { Animated, Modal, PanResponder, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, UIManager, View } from "react-native";
 import DateTimePicker, { DateTimePickerAndroid } from "@react-native-community/datetimepicker";
 import { Calendar, Check, ChevronDown, ChevronRight, Coins, MapPin, Trash2, X } from "lucide-react-native";
 import { useSQLiteContext } from "expo-sqlite";
+import RNPickerSelect from "react-native-picker-select";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { TagSearchModal } from "@/src/components/TagSearchModal";
 
 import type { ReceiptItem } from "./types";
 
@@ -21,12 +24,14 @@ type ReceiptDetailModalProps = {
 type ReceiptLineItem = {
   id: string;
   dbProductId: number | null;
+  userId: number | null;
   name: string;
   amountLabel: string;
   totalValue: number;
   quantity: string;
   unit: string;
   categoryName: string;
+  subcategoryName: string;
   categoryColor: string;
 };
 
@@ -134,13 +139,59 @@ const parseAmountFromLabel = (rawAmountLabel: string): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const getUniqueNames = (values: Array<string | null | undefined>): string[] => {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const raw of values) {
+    const value = raw?.trim();
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(value);
+  }
+  return unique;
+};
+
+const normalizeReceiptPhotoUri = (value: string | null | undefined): string | null => {
+  const raw = value?.trim();
+  if (!raw) return null;
+  if (raw.startsWith("file://")) {
+    return raw;
+  }
+  if (raw.startsWith("file:")) {
+    const normalizedPath = raw.replace(/^file:\/*/, "/");
+    return `file://${normalizedPath}`;
+  }
+  if (raw.startsWith("content://")) {
+    return raw;
+  }
+  if (raw.startsWith("content:")) {
+    const normalizedPath = raw.replace(/^content:\/*/, "");
+    return `content://${normalizedPath}`;
+  }
+  if (
+    raw.startsWith("http://") ||
+    raw.startsWith("https://") ||
+    raw.startsWith("ph://") ||
+    raw.startsWith("data:image/")
+  ) {
+    return raw;
+  }
+  if (raw.startsWith("/")) {
+    return `file://${raw}`;
+  }
+  return raw;
+};
+
 function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap, onClose }: ReceiptDetailModalProps) {
   const [fontsLoaded] = useFonts({
     Nunito_900Black,
   });
   const db = useSQLiteContext();
   const insets = useSafeAreaInsets();
-  const hasImage = Boolean(item?.receiptPhotoUri);
+  const [resolvedReceiptPhotoUri, setResolvedReceiptPhotoUri] = React.useState<string | null>(null);
+  const hasImage = Boolean(resolvedReceiptPhotoUri);
   const currencyValue = item?.currency ?? "RON";
   const [editableDate, setEditableDate] = React.useState("5 Mar 2026");
   const [editableTime, setEditableTime] = React.useState("00:00");
@@ -156,19 +207,13 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
   const [editItemUnit, setEditItemUnit] = React.useState("pcs");
   const [editItemTotalPrice, setEditItemTotalPrice] = React.useState("0.00");
   const [editItemCategory, setEditItemCategory] = React.useState("");
-  const [showEditItemCategoryOptions, setShowEditItemCategoryOptions] = React.useState(false);
+  const [editItemSubcategory, setEditItemSubcategory] = React.useState("");
+  const [editItemSubcategoryOptions, setEditItemSubcategoryOptions] = React.useState<string[]>([]);
+  const [activeFallbackPicker, setActiveFallbackPicker] = React.useState<"category" | "subcategory" | null>(null);
   const editItemSheetTranslateY = React.useRef(new Animated.Value(900)).current;
   const editItemCategoryOptions = React.useMemo(() => {
-    const seen = new Set<string>();
-    const normalized = categoryOptions.reduce<string[]>((acc, rawOption) => {
-      const option = rawOption.trim();
-      if (!option) return acc;
-      const key = option.toLowerCase();
-      if (seen.has(key)) return acc;
-      seen.add(key);
-      acc.push(option);
-      return acc;
-    }, []);
+    const normalized = getUniqueNames(categoryOptions);
+    const seen = new Set(normalized.map((option) => option.toLowerCase()));
 
     const current = editItemCategory.trim();
     if (current && !seen.has(current.toLowerCase())) {
@@ -192,6 +237,48 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
     setPendingTimePickerValue(initialDateTime);
   }, [item?.fullDate, visible]);
   React.useEffect(() => {
+    if (!visible || !item) {
+      setResolvedReceiptPhotoUri(null);
+      return;
+    }
+
+    let isCancelled = false;
+    const fallbackUri = normalizeReceiptPhotoUri(item.receiptPhotoUri ?? null);
+    setResolvedReceiptPhotoUri(fallbackUri);
+
+    const paymentId = item.id.startsWith("db-") ? Number(item.id.replace("db-", "")) : NaN;
+    if (!Number.isFinite(paymentId) || paymentId <= 0) {
+      return;
+    }
+
+    const loadFromDb = async () => {
+      try {
+        const row = await db.getFirstAsync<{ receiptPhotoLink: string | null }>(
+          `SELECT receipt_photo_link AS receiptPhotoLink
+           FROM payments
+           WHERE id = ?
+           LIMIT 1`,
+          [paymentId],
+        );
+        const dbUri = normalizeReceiptPhotoUri(row?.receiptPhotoLink ?? null);
+        if (!isCancelled) {
+          setResolvedReceiptPhotoUri(dbUri ?? fallbackUri);
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          setResolvedReceiptPhotoUri(fallbackUri);
+        }
+        console.error("Failed loading receipt photo link:", error);
+      }
+    };
+
+    void loadFromDb();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [db, item, visible]);
+  React.useEffect(() => {
     if (!visible) {
       setShowDatePickerModal(false);
       setShowTimePickerModal(false);
@@ -202,7 +289,9 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
       setEditItemUnit("pcs");
       setEditItemTotalPrice("0.00");
       setEditItemCategory("");
-      setShowEditItemCategoryOptions(false);
+      setEditItemSubcategory("");
+      setEditItemSubcategoryOptions([]);
+      setActiveFallbackPicker(null);
       editItemSheetTranslateY.setValue(900);
     }
   }, [editItemSheetTranslateY, visible]);
@@ -218,12 +307,14 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
             {
               id: `fallback-${item.id}`,
               dbProductId: null,
+              userId: null,
               name: item.title || "Item",
               amountLabel: item.amount || `${currencyValue} 0.00`,
               totalValue: parseAmountFromLabel(item.amount || ""),
               quantity: "1",
               unit: "pcs",
               categoryName: fallbackCategory,
+              subcategoryName: "",
               categoryColor: fallbackCategoryColor,
             },
           ]
@@ -255,14 +346,18 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
       try {
         const rows = await db.getAllAsync<{
           id: number;
+          userId: number;
           name: string;
           price: number;
+          firstSubcategory: string | null;
           categoryName: string | null;
           categoryColor: string | null;
         }>(
           `SELECT p.id AS id,
+                  p.user_id AS userId,
                   p.name AS name,
                   p.price AS price,
+                  p.first_subcategory AS firstSubcategory,
                   c.category_name AS categoryName,
                   c.color AS categoryColor
            FROM products p
@@ -273,19 +368,21 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
         );
 
         const mapped = rows.map((row) => ({
-          id: `product-${row.id}`,
-          dbProductId: row.id,
-          name: row.name?.trim() || "Unnamed item",
-          amountLabel: `${currencyValue} ${(Number(row.price ?? 0) / 100).toFixed(2)}`,
-          totalValue: Number(row.price ?? 0) / 100,
-          quantity: "1",
-          unit: "pcs",
-          categoryName: row.categoryName?.trim() || item.category || "General",
-          categoryColor:
-            row.categoryColor?.trim() ||
-            categoryAccentMap[row.categoryName?.trim() || ""] ||
-            categoryAccentMap[item.category] ||
-            "#6B7280",
+            id: `product-${row.id}`,
+            dbProductId: row.id,
+            userId: row.userId ?? null,
+            name: row.name?.trim() || "Unnamed item",
+            amountLabel: `${currencyValue} ${(Number(row.price ?? 0) / 100).toFixed(2)}`,
+            totalValue: Number(row.price ?? 0) / 100,
+            quantity: "1",
+            unit: "pcs",
+            categoryName: row.categoryName?.trim() || item.category || "General",
+            subcategoryName: row.firstSubcategory?.trim() || "",
+            categoryColor:
+              row.categoryColor?.trim() ||
+              categoryAccentMap[row.categoryName?.trim() || ""] ||
+              categoryAccentMap[item.category] ||
+              "#6B7280",
         }));
 
         if (!isCancelled) {
@@ -302,6 +399,100 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
       isCancelled = true;
     };
   }, [categoryAccentMap, currencyValue, db, item, visible]);
+
+  React.useEffect(() => {
+    if (!showEditItemModal) {
+      setEditItemSubcategoryOptions([]);
+      return;
+    }
+
+    let isCancelled = false;
+
+    const loadSubcategoryOptions = async () => {
+      const categoryName =
+        editItemCategory.trim() ||
+        selectedLineItem?.categoryName?.trim() ||
+        item?.category?.trim() ||
+        "General";
+      const currentSubcategory = editItemSubcategory.trim();
+      const userId = selectedLineItem?.userId;
+
+      try {
+        const rows = userId
+          ? await db.getAllAsync<{ name: string | null }>(
+              `SELECT name
+               FROM subcategory_presets
+               WHERE user_id = ? AND category_name = ? AND is_archived = 0
+               ORDER BY use_count DESC, last_used_at DESC, name ASC`,
+              [userId, categoryName],
+            )
+          : await db.getAllAsync<{ name: string | null }>(
+              `SELECT name
+               FROM subcategory_presets
+               WHERE category_name = ? AND is_archived = 0
+               ORDER BY use_count DESC, last_used_at DESC, name ASC`,
+              [categoryName],
+            );
+
+        const presetOptions = getUniqueNames(rows.map((row) => row.name));
+        const mergedOptions = getUniqueNames([currentSubcategory, ...presetOptions]);
+
+        if (!isCancelled) {
+          setEditItemSubcategoryOptions(mergedOptions);
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          setEditItemSubcategoryOptions(getUniqueNames([currentSubcategory]));
+        }
+        console.error("Failed to load subcategory options:", error);
+      }
+    };
+
+    void loadSubcategoryOptions();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [db, editItemCategory, editItemSubcategory, item?.category, selectedLineItem, showEditItemModal]);
+
+  const categoryPickerItems = React.useMemo(
+    () => editItemCategoryOptions.map((option) => ({ label: option, value: option })),
+    [editItemCategoryOptions],
+  );
+  const categoryFallbackItems = React.useMemo(
+    () => categoryPickerItems.map((item) => item.label),
+    [categoryPickerItems],
+  );
+  const subcategoryPickerItems = React.useMemo(
+    () => [
+      { label: "Not set", value: "" },
+      ...getUniqueNames([editItemSubcategory, ...editItemSubcategoryOptions]).map((option) => ({
+        label: option,
+        value: option,
+      })),
+    ],
+    [editItemSubcategory, editItemSubcategoryOptions],
+  );
+  const subcategoryFallbackItems = React.useMemo(
+    () => subcategoryPickerItems.map((item) => item.label),
+    [subcategoryPickerItems],
+  );
+  const isNativePickerAvailable = React.useMemo(() => {
+    if (Platform.OS === "web") return false;
+    const getConfig = UIManager.getViewManagerConfig?.bind(UIManager);
+    if (!getConfig) return false;
+    if (Platform.OS === "ios") {
+      return Boolean(getConfig("RNCPicker"));
+    }
+    if (Platform.OS === "android") {
+      return Boolean(
+        getConfig("RNCPicker") ||
+          getConfig("RNCAndroidDialogPicker") ||
+          getConfig("RNCAndroidDropdownPicker"),
+      );
+    }
+    return true;
+  }, []);
 
   const receiptDateTime = `${editableDate.toLowerCase()} at ${editableTime}`;
   const openNativeDatePicker = React.useCallback(() => {
@@ -363,7 +554,9 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
       setEditItemUnit("pcs");
       setEditItemTotalPrice("0.00");
       setEditItemCategory("");
-      setShowEditItemCategoryOptions(false);
+      setEditItemSubcategory("");
+      setEditItemSubcategoryOptions([]);
+      setActiveFallbackPicker(null);
     });
   }, [editItemSheetTranslateY]);
   const springBackEditItemModal = React.useCallback(() => {
@@ -374,6 +567,20 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
       bounciness: 5,
     }).start();
   }, [editItemSheetTranslateY]);
+  const handleSelectEditCategory = React.useCallback(
+    (option: string) => {
+      const next = option.trim();
+      const prev = editItemCategory.trim();
+      setEditItemCategory(next);
+      if (next.toLowerCase() !== prev.toLowerCase()) {
+        setEditItemSubcategory("");
+      }
+    },
+    [editItemCategory],
+  );
+  const handleSelectEditSubcategory = React.useCallback((option: string) => {
+    setEditItemSubcategory(option);
+  }, []);
   const handleSaveEditedItem = React.useCallback(() => {
     if (!selectedLineItem) return;
 
@@ -389,6 +596,8 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
       categoryOptions[0]?.trim() ||
       item?.category?.trim() ||
       "General";
+    const normalizedSubcategory = editItemSubcategory.trim();
+    const persistedSubcategory = normalizedSubcategory.length > 0 ? normalizedSubcategory : null;
     const updatedCategoryColor =
       categoryAccentMap[normalizedCategory] || selectedLineItem.categoryColor || categoryAccentMap[item?.category || ""] || "#6B7280";
 
@@ -403,6 +612,7 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
               totalValue: safeTotal,
               amountLabel: updatedAmountLabel,
               categoryName: normalizedCategory,
+              subcategoryName: normalizedSubcategory,
               categoryColor: updatedCategoryColor,
             }
           : lineItem,
@@ -416,16 +626,18 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
           `UPDATE products
            SET name = ?,
                price = ?,
+               first_subcategory = ?,
                category_id = COALESCE(
                  (SELECT id FROM categories WHERE category_name = ? ORDER BY id DESC LIMIT 1),
                  category_id
                )
            WHERE id = ?`,
           [
-          normalizedName,
-          totalCents,
-          normalizedCategory,
-          selectedLineItem.dbProductId,
+            normalizedName,
+            totalCents,
+            persistedSubcategory,
+            normalizedCategory,
+            selectedLineItem.dbProductId,
           ],
         )
         .catch((error) => {
@@ -443,6 +655,7 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
     editItemCategory,
     editItemName,
     editItemQuantity,
+    editItemSubcategory,
     editItemTotalPrice,
     editItemUnit,
     item?.category,
@@ -469,7 +682,8 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
     setEditItemUnit(lineItem.unit);
     setEditItemTotalPrice(lineItem.totalValue.toFixed(2));
     setEditItemCategory(lineItem.categoryName);
-    setShowEditItemCategoryOptions(false);
+    setEditItemSubcategory(lineItem.subcategoryName || "");
+    setActiveFallbackPicker(null);
     setSelectedLineItem(lineItem);
     setShowEditItemModal(true);
     editItemSheetTranslateY.setValue(900);
@@ -528,7 +742,7 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
           >
             <View style={styles.imageContainer}>
               {hasImage ? (
-                <Image source={{ uri: item?.receiptPhotoUri ?? undefined }} resizeMode="contain" style={styles.receiptImage} />
+                <ExpoImage source={resolvedReceiptPhotoUri} contentFit="contain" style={styles.receiptImage} />
               ) : (
                 <Text style={styles.noImageText}>(no image yet)</Text>
               )}
@@ -594,8 +808,9 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
               {receiptItems.length === 0 ? (
                 <Text style={styles.itemsEmptyText}>(no items yet)</Text>
               ) : (
-                receiptItems.map((receiptItem, index) => (
-                  <View key={receiptItem.id}>
+                receiptItems.map((receiptItem, index) => {
+                  return (
+                    <View key={receiptItem.id}>
                     <TouchableOpacity
                       activeOpacity={0.8}
                       onPress={() => openEditItemModal(receiptItem)}
@@ -606,18 +821,27 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
                           <Text style={styles.itemsName} numberOfLines={1}>
                             {receiptItem.name}
                           </Text>
-                          <View
-                            style={[
-                              styles.itemCategoryBadge,
-                              {
-                                backgroundColor: withAlpha(receiptItem.categoryColor, 0.14),
-                                borderColor: withAlpha(receiptItem.categoryColor, 0.32),
-                              },
-                            ]}
-                          >
-                            <Text style={[styles.itemCategoryBadgeText, { color: receiptItem.categoryColor }]}>
-                              {receiptItem.categoryName}
-                            </Text>
+                          <View style={styles.itemBadgesRow}>
+                            <View
+                              style={[
+                                styles.itemCategoryBadge,
+                                {
+                                  backgroundColor: withAlpha(receiptItem.categoryColor, 0.14),
+                                  borderColor: withAlpha(receiptItem.categoryColor, 0.32),
+                                },
+                              ]}
+                            >
+                              <Text style={[styles.itemCategoryBadgeText, { color: receiptItem.categoryColor }]}>
+                                {receiptItem.categoryName}
+                              </Text>
+                            </View>
+                            {receiptItem.subcategoryName.trim().length > 0 ? (
+                              <View style={styles.itemSubcategoryBadge}>
+                                <Text style={styles.itemSubcategoryBadgeText}>
+                                  {receiptItem.subcategoryName}
+                                </Text>
+                              </View>
+                            ) : null}
                           </View>
                         </View>
                         <View style={styles.itemsAmountWrap}>
@@ -627,7 +851,8 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
                     </TouchableOpacity>
                     {index < receiptItems.length - 1 ? <View style={styles.itemsSeparator} /> : null}
                   </View>
-                ))
+                  );
+                })
               )}
             </View>
           </ScrollView>
@@ -713,49 +938,81 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
                   <View style={styles.editItemCategoryCard}>
                     <View style={styles.editItemRow}>
                       <Text style={styles.editItemLabel}>Category</Text>
-                      <TouchableOpacity
-                        activeOpacity={0.8}
-                        style={styles.editItemCategoryTrigger}
-                        onPress={() => setShowEditItemCategoryOptions((prev) => !prev)}
-                      >
-                        <Text style={styles.editItemValueText}>{editItemCategory.trim() || "General"}</Text>
-                        <ChevronDown
-                          size={14}
-                          color="#6B7280"
-                          style={showEditItemCategoryOptions ? styles.editItemChevronOpen : null}
-                        />
-                      </TouchableOpacity>
-                    </View>
-                    {showEditItemCategoryOptions ? (
-                      <View style={styles.editItemCategoryOptions}>
-                        {editItemCategoryOptions.map((option) => {
-                          const isActive = option.toLowerCase() === (editItemCategory.trim() || "General").toLowerCase();
-                          return (
-                            <TouchableOpacity
-                              key={option}
-                              activeOpacity={0.8}
-                              style={[
-                                styles.editItemCategoryOption,
-                                isActive ? styles.editItemCategoryOptionActive : null,
-                              ]}
-                              onPress={() => {
-                                setEditItemCategory(option);
-                                setShowEditItemCategoryOptions(false);
-                              }}
-                            >
-                              <Text
-                                style={[
-                                  styles.editItemCategoryOptionText,
-                                  isActive ? styles.editItemCategoryOptionTextActive : null,
-                                ]}
-                              >
-                                {option}
-                              </Text>
-                            </TouchableOpacity>
-                          );
-                        })}
+                      <View style={styles.editItemCategoryAnchor}>
+                        {isNativePickerAvailable ? (
+                          <RNPickerSelect
+                            onValueChange={(value) => {
+                              if (typeof value === "string" && value.trim()) {
+                                handleSelectEditCategory(value);
+                              }
+                            }}
+                            items={categoryPickerItems}
+                            value={editItemCategory.trim() || "General"}
+                            useNativeAndroidPickerStyle={false}
+                            placeholder={{ label: "Select category", value: null }}
+                            Icon={() => <ChevronDown size={14} color="#6B7280" />}
+                            style={{
+                              viewContainer: styles.editItemPickerViewContainer,
+                              iconContainer: styles.editItemPickerIconContainer,
+                              inputIOS: styles.editItemPickerInput,
+                              inputAndroid: styles.editItemPickerInput,
+                              placeholder: styles.editItemPickerPlaceholder,
+                            }}
+                          />
+                        ) : (
+                          <TouchableOpacity
+                            activeOpacity={0.8}
+                            style={styles.editItemPickerFallbackButton}
+                            onPress={() => setActiveFallbackPicker("category")}
+                          >
+                            <Text style={styles.editItemPickerFallbackText} numberOfLines={1}>
+                              {editItemCategory.trim() || "General"}
+                            </Text>
+                            <ChevronDown size={14} color="#6B7280" />
+                          </TouchableOpacity>
+                        )}
                       </View>
-                    ) : null}
+                    </View>
+                  </View>
+                  <Text style={[styles.editItemCategorySectionTitle,{ marginTop:20, marginBottom: -5}]}>Subcategory</Text>
+                  <View style={styles.editItemCategoryCard}>
+                    <View style={styles.editItemRow}>
+                      <Text style={styles.editItemLabel}>Subcategory</Text>
+                      <View style={styles.editItemSubcategoryAnchor}>
+                        {isNativePickerAvailable ? (
+                          <RNPickerSelect
+                            onValueChange={(value) => {
+                              if (typeof value === "string") {
+                                handleSelectEditSubcategory(value);
+                              }
+                            }}
+                            items={subcategoryPickerItems}
+                            value={editItemSubcategory.trim()}
+                            useNativeAndroidPickerStyle={false}
+                            placeholder={{ label: "Not set", value: "" }}
+                            Icon={() => <ChevronDown size={14} color="#6B7280" />}
+                            style={{
+                              viewContainer: styles.editItemPickerViewContainer,
+                              iconContainer: styles.editItemPickerIconContainer,
+                              inputIOS: styles.editItemPickerInput,
+                              inputAndroid: styles.editItemPickerInput,
+                              placeholder: styles.editItemPickerPlaceholder,
+                            }}
+                          />
+                        ) : (
+                          <TouchableOpacity
+                            activeOpacity={0.8}
+                            style={styles.editItemPickerFallbackButton}
+                            onPress={() => setActiveFallbackPicker("subcategory")}
+                          >
+                            <Text style={styles.editItemPickerFallbackText} numberOfLines={1}>
+                              {editItemSubcategory.trim() || "Not set"}
+                            </Text>
+                            <ChevronDown size={14} color="#6B7280" />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
                   </View>
                   <Text style={styles.editItemActionsTitle}>Actions</Text>
 
@@ -775,6 +1032,43 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
               </Animated.View>
             </View>
           ) : null}
+          <TagSearchModal
+            visible={activeFallbackPicker === "category"}
+            title="Select category"
+            items={categoryFallbackItems}
+            placeholder="Search categories"
+            addLabel="Select"
+            cornerRadius={26}
+            saveMatchedValueOnDismiss
+            dismissOnItemPress
+            onAdd={(value) => {
+              const normalized = value.trim();
+              if (!normalized) return;
+              handleSelectEditCategory(normalized);
+              setActiveFallbackPicker(null);
+            }}
+            onDismiss={() => setActiveFallbackPicker(null)}
+          />
+          <TagSearchModal
+            visible={activeFallbackPicker === "subcategory"}
+            title="Select subcategory"
+            items={subcategoryFallbackItems}
+            placeholder="Search subcategories"
+            addLabel="Select"
+            cornerRadius={26}
+            saveMatchedValueOnDismiss
+            dismissOnItemPress
+            onAdd={(value) => {
+              const normalized = value.trim();
+              if (normalized.toLowerCase() === "not set") {
+                handleSelectEditSubcategory("");
+              } else {
+                handleSelectEditSubcategory(normalized);
+              }
+              setActiveFallbackPicker(null);
+            }}
+            onDismiss={() => setActiveFallbackPicker(null)}
+          />
           {Platform.OS !== "android" && showDatePickerModal ? (
             <Modal transparent animationType="fade" visible onRequestClose={() => setShowDatePickerModal(false)}>
               <View style={styles.datePickerOverlay}>
@@ -1193,6 +1487,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     justifyContent: "center",
   },
+  itemBadgesRow: {
+    marginTop: 3,
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  itemSubcategoryBadge: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 8,
+    minHeight: 22,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#EC4899",
+    backgroundColor: "#FCE7F3",
+    justifyContent: "center",
+    maxWidth: "100%",
+  },
+  itemSubcategoryBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#BE185D",
+  },
   itemCategoryBadgeText: {
     fontSize: 11,
     fontWeight: "700",
@@ -1294,42 +1611,59 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#111827",
   },
-  editItemCategoryTrigger: {
-    minHeight: 32,
-    paddingLeft: 0,
-    paddingRight: 0,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
+  editItemCategoryAnchor: {
+    width: "30%",
+    minWidth: 110,
+    maxWidth: 170,
   },
-  editItemChevronOpen: {
-    transform: [{ rotate: "180deg" }],
+  editItemSubcategoryAnchor: {
+    width: "46%",
+    minWidth: 150,
+    maxWidth: 250,
   },
-  editItemCategoryOptions: {
-    marginTop: 8,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  editItemCategoryOption: {
-    paddingVertical: 7,
-    paddingHorizontal: 12,
-    borderRadius: 999,
+  editItemPickerViewContainer: {
     borderWidth: 1,
     borderColor: "#E5E7EB",
-    backgroundColor: "#F9FAFB",
+    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    minHeight: 34,
+    justifyContent: "center",
+    overflow: "hidden",
   },
-  editItemCategoryOptionActive: {
-    borderColor: "#111827",
-    backgroundColor: "#111827",
+  editItemPickerIconContainer: {
+    top: 9,
+    right: 8,
   },
-  editItemCategoryOptionText: {
-    fontSize: 13,
+  editItemPickerInput: {
+    fontSize: 14,
     fontWeight: "700",
-    color: "#374151",
+    color: "#111827",
+    paddingVertical: 8,
+    paddingLeft: 8,
+    paddingRight: 26,
   },
-  editItemCategoryOptionTextActive: {
-    color: "#FFFFFF",
+  editItemPickerPlaceholder: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#6B7280",
+  },
+  editItemPickerFallbackButton: {
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    minHeight: 34,
+    paddingHorizontal: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 6,
+  },
+  editItemPickerFallbackText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#111827",
   },
   editItemActionsTitle: {
     width: "100%",

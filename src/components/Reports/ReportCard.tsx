@@ -3,12 +3,13 @@ import { Image, StyleSheet, Text, View } from "react-native";
 import { ReceiptText } from "lucide-react-native";
 
 import { STATUS_CONFIG } from "./constants";
+import type { ReceiptStatus } from "./types";
 
 type ReportCardProps = {
   title: string;
   date: string;
   amount: string;
-  status: "processed" | "needs action" | "failed";
+  status: ReceiptStatus;
   receiptPhotoUri?: string | null;
 };
 
