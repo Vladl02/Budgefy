@@ -11,6 +11,9 @@ type TagSearchModalProps = {
   placeholder?: string;
   addLabel?: string;
   closeOnAdd?: boolean;
+  cornerRadius?: number;
+  saveMatchedValueOnDismiss?: boolean;
+  dismissOnItemPress?: boolean;
 };
 
 const VISIBLE_ITEMS = 6;
@@ -27,6 +30,9 @@ export function TagSearchModal({
   placeholder = "Search...",
   addLabel = "Add",
   closeOnAdd = true,
+  cornerRadius = 16,
+  saveMatchedValueOnDismiss = false,
+  dismissOnItemPress = false,
 }: TagSearchModalProps) {
   const { isDark } = useAppTheme();
   const [query, setQuery] = useState("");
@@ -50,14 +56,27 @@ export function TagSearchModal({
     if (closeOnAdd) onDismiss();
   };
 
+  const handleDismiss = () => {
+    if (saveMatchedValueOnDismiss) {
+      const value = query.trim();
+      if (value) {
+        const matched = items.find((item) => item.toLowerCase() === value.toLowerCase());
+        if (matched) {
+          onAdd(matched);
+        }
+      }
+    }
+    onDismiss();
+  };
+
   const canAdd = query.trim().length > 0;
 
   return (
-    <Modal transparent visible={visible} animationType="fade" onRequestClose={onDismiss}>
+    <Modal transparent visible={visible} animationType="fade" onRequestClose={handleDismiss}>
       <View style={styles.root}>
-        <Pressable style={[styles.backdrop, isDark ? styles.backdropDark : null]} onPress={onDismiss} />
+        <Pressable style={[styles.backdrop, isDark ? styles.backdropDark : null]} onPress={handleDismiss} />
 
-        <View style={[styles.card, isDark ? styles.cardDark : null]}>
+        <View style={[styles.card, { borderRadius: cornerRadius }, isDark ? styles.cardDark : null]}>
           <Text style={[styles.title, isDark ? styles.titleDark : null]}>{title}</Text>
 
           <View style={styles.searchRow}>
@@ -89,7 +108,18 @@ export function TagSearchModal({
               <Text style={[styles.emptyText, isDark ? styles.emptyTextDark : null]}>No matches</Text>
             ) : (
               filtered.map((item) => (
-                <Pressable key={item} style={[styles.listItem, isDark ? styles.listItemDark : null]} onPress={() => setQuery(item)}>
+                <Pressable
+                  key={item}
+                  style={[styles.listItem, isDark ? styles.listItemDark : null]}
+                  onPress={() => {
+                    if (dismissOnItemPress) {
+                      onAdd(item);
+                      onDismiss();
+                      return;
+                    }
+                    setQuery(item);
+                  }}
+                >
                   <Text style={[styles.listText, isDark ? styles.listTextDark : null]}>{item}</Text>
                 </Pressable>
               ))
@@ -191,8 +221,8 @@ const styles = StyleSheet.create({
     height: ITEM_HEIGHT,
     justifyContent: "center",
     paddingHorizontal: 12,
-    borderRadius: 10,
-    backgroundColor: "#F6F6F6",
+    borderRadius: 18,
+    backgroundColor: "#fdfdfd",
     marginBottom: ITEM_GAP,
   },
   listItemDark: {

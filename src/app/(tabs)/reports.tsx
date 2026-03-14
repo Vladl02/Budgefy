@@ -4,6 +4,7 @@ import { STATUS_CONFIG } from "@/src/components/Reports/constants";
 import type { ReceiptItem } from "@/src/components/Reports/types";
 import { categories as categoriesTable, payments as paymentsTable, users } from "@/src/db/schema";
 import { useAppTheme } from "@/src/providers/AppThemeProvider";
+import { useProcessingReceiptsStore } from "@/src/stores/receiptProcessingStore";
 import { useIsFocused } from "@react-navigation/native";
 import { FlashList } from "@shopify/flash-list";
 import { LinearGradient } from "expo-linear-gradient";
@@ -114,6 +115,36 @@ const formatTransactionDateLabel = (date: Date | string): string =>
   getSafeDate(date).toLocaleDateString("en-GB", TRANSACTION_DATE_FORMAT);
 const normalizeToken = (value: string | null | undefined): string =>
   (value ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+const normalizeReceiptPhotoUri = (value: string | null | undefined): string | null => {
+  const raw = value?.trim();
+  if (!raw) return null;
+  if (raw.startsWith("file://")) {
+    return raw;
+  }
+  if (raw.startsWith("file:")) {
+    const normalizedPath = raw.replace(/^file:\/*/, "/");
+    return `file://${normalizedPath}`;
+  }
+  if (raw.startsWith("content://")) {
+    return raw;
+  }
+  if (raw.startsWith("content:")) {
+    const normalizedPath = raw.replace(/^content:\/*/, "");
+    return `content://${normalizedPath}`;
+  }
+  if (
+    raw.startsWith("http://") ||
+    raw.startsWith("https://") ||
+    raw.startsWith("ph://") ||
+    raw.startsWith("data:image/")
+  ) {
+    return raw;
+  }
+  if (raw.startsWith("/")) {
+    return `file://${raw}`;
+  }
+  return raw;
+};
 const withAlpha = (hexColor: string, alpha: number): string => {
   const normalized = hexColor.replace("#", "").trim();
   if (!/^[0-9a-fA-F]{6}$/.test(normalized)) {
@@ -377,6 +408,7 @@ type ReceiptGroup = {
 export default function Reports() {
   const isFocused = useIsFocused();
   const { isDark } = useAppTheme();
+  const { processingReceipts } = useProcessingReceiptsStore();
   const [receiptEdits, setReceiptEdits] = useState<Record<string, ReceiptItem>>({});
   const [deletedReceiptIds, setDeletedReceiptIds] = useState<Record<string, true>>({});
   const [selectedReceipt, setSelectedReceipt] = useState<ReceiptItem | null>(null);
@@ -421,7 +453,14 @@ export default function Reports() {
           marketName: paymentsTable.marketName,
           sourceType: paymentsTable.sourceType,
           createdAt: paymentsTable.createdAt,
-          receiptPhotoLink: paymentsTable.receiptPhotoLink,
+          receiptPhotoLink: sql<string | null>`
+            CASE
+              WHEN ${paymentsTable.receiptPhotoLink} IS NOT NULL
+                   AND length(${paymentsTable.receiptPhotoLink}) > 8192
+              THEN NULL
+              ELSE ${paymentsTable.receiptPhotoLink}
+            END
+          `,
           categoryName: categoriesTable.categoryName,
           categoryColor: categoriesTable.color,
           categoryIcon: categoriesTable.icon,
@@ -495,7 +534,7 @@ export default function Reports() {
         currency: "RON",
         comment: "",
         fullPage: false,
-        receiptPhotoUri: payment.receiptPhotoLink ?? null,
+        receiptPhotoUri: normalizeReceiptPhotoUri(payment.receiptPhotoLink),
         status: "processed",
         sourceType: payment.sourceType ?? "manual",
         categoryIconName: payment.categoryIcon ?? null,
@@ -514,12 +553,13 @@ export default function Reports() {
 
   const receipts = useMemo(
     () => [
+      ...processingReceipts,
       ...seededReceipts,
       ...dbReceipts
         .filter((item) => !deletedReceiptIds[item.id])
         .map((item) => ({ ...item, ...(receiptEdits[item.id] ?? {}) })),
     ],
-    [dbReceipts, deletedReceiptIds, receiptEdits, seededReceipts],
+    [dbReceipts, deletedReceiptIds, processingReceipts, receiptEdits, seededReceipts],
   );
 
   const sortedReceipts = useMemo(
@@ -528,7 +568,10 @@ export default function Reports() {
   );
 
   const monthFilteredReceipts = useMemo(
-    () => sortedReceipts.filter((item) => isInMonth(getSafeDate(item.fullDate), selectedMonthStart)),
+    () =>
+      sortedReceipts.filter((item) =>
+        item.status === "processing" || isInMonth(getSafeDate(item.fullDate), selectedMonthStart),
+      ),
     [sortedReceipts, selectedMonthStart],
   );
 
@@ -691,7 +734,7 @@ export default function Reports() {
     }
 
     return monthFilteredReceipts.filter((item) =>
-      [item.title, item.category, item.amount, item.date, item.status]
+      [item.title, item.category, item.amount, item.date, item.status, item.comment]
         .join(" ")
         .toLowerCase()
         .includes(normalizedSearch),
@@ -919,6 +962,12 @@ export default function Reports() {
           {item.items.map((receipt, index) => {
             const statusConfig = STATUS_CONFIG[receipt.status] || STATUS_CONFIG.processed;
             const transactionDateLabel = formatTransactionDateLabel(receipt.fullDate);
+            const rowMetaText =
+              receipt.status === "processing"
+                ? receipt.comment?.trim() || "Working on your receipt..."
+                : receipt.status === "failed" && receipt.comment?.trim()
+                  ? receipt.comment.trim()
+                  : transactionDateLabel;
             const isManualEntry = receipt.sourceType === "manual";
             const categoryColor = receipt.categoryColor ?? "#8E8E93";
             const categoryIconBg = withAlpha(categoryColor, isDark ? 0.22 : 0.14);
@@ -969,7 +1018,7 @@ export default function Reports() {
                           {receipt.title}
                         </Text>
                         <Text style={[styles.groupMetaText, isDark ? styles.groupMetaTextDark : null]} numberOfLines={1}>
-                          {transactionDateLabel}
+                          {rowMetaText}
                         </Text>
                       </View>
 

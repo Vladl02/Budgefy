@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
 import { FunctionsHttpError } from "@supabase/supabase-js";
+import * as FileSystem from "expo-file-system/legacy";
 import type { SQLiteDatabase } from "expo-sqlite";
 import { supabase } from "@/src/utils/supabase";
 
@@ -30,6 +31,76 @@ type SpendingContext = {
   categoryId: number;
 };
 
+const resolveReceiptPhotoLink = (rawValue: string | null | undefined): string | null => {
+  const raw = rawValue?.trim();
+  if (!raw) return null;
+
+  if (raw.startsWith("file://")) {
+    return raw;
+  }
+  if (raw.startsWith("file:")) {
+    const normalizedPath = raw.replace(/^file:\/*/, "/");
+    return `file://${normalizedPath}`;
+  }
+  if (raw.startsWith("content://")) {
+    return raw;
+  }
+  if (raw.startsWith("content:")) {
+    const normalizedPath = raw.replace(/^content:\/*/, "");
+    return `content://${normalizedPath}`;
+  }
+  if (
+    raw.startsWith("ph://") ||
+    raw.startsWith("http://") ||
+    raw.startsWith("https://") ||
+    raw.startsWith("data:image/")
+  ) {
+    return raw;
+  }
+
+  if (raw.startsWith("/")) {
+    return `file://${raw}`;
+  }
+
+  return null;
+};
+
+const resolveImagePayloadBase64 = async (rawValue: string): Promise<string | null> => {
+  const raw = rawValue.trim();
+  if (!raw) return null;
+
+  if (raw.startsWith("data:image/")) {
+    const commaIndex = raw.indexOf(",");
+    if (commaIndex < 0) return null;
+    const payload = raw.slice(commaIndex + 1).trim();
+    return payload.length > 0 ? payload : null;
+  }
+
+  const normalizedBase64 = raw.replace(/\s+/g, "");
+  const isBase64Like = /^[A-Za-z0-9+/=_-]+$/.test(normalizedBase64);
+  if (!raw.includes("://") && !raw.startsWith("/") && isBase64Like && normalizedBase64.length > 64) {
+    return normalizedBase64;
+  }
+
+  const receiptPhotoLink = resolveReceiptPhotoLink(raw);
+  if (!receiptPhotoLink) return null;
+
+  if (receiptPhotoLink.startsWith("file://") || receiptPhotoLink.startsWith("content://")) {
+    try {
+      const fileBase64 = await FileSystem.readAsStringAsync(receiptPhotoLink, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      const normalizedFileBase64 = fileBase64.replace(/\s+/g, "");
+      return normalizedFileBase64.length > 0 ? normalizedFileBase64 : null;
+    } catch (error) {
+      console.error("Failed reading scanned image as base64:", error);
+      return null;
+    }
+  }
+
+  return null;
+};
+
 export type ReceiptScanResult =
   | { status: "saved"; savedCount: number }
   | { status: "cancel" }
@@ -45,6 +116,10 @@ export type ReceiptScanOnlyResult =
   | { status: "unavailable_native" }
   | { status: "unavailable_web" };
 
+export type ReceiptAnalyzeResult =
+  | { status: "saved" }
+  | { status: "failed"; reason: string };
+
 type DocumentScannerModule = {
   scanDocument: (options: {
     responseType: string;
@@ -56,6 +131,7 @@ type DocumentScannerModule = {
   }>;
   ResponseType?: {
     Base64?: string;
+    ImageFilePath?: string;
   };
   ScanDocumentResponseStatus?: {
     Cancel?: string;
@@ -182,6 +258,20 @@ const getStringByKeys = (record: UnknownRecord, keys: string[]): string | null =
   for (const key of keys) {
     const normalized = normalizeOrNull(record[key]);
     if (normalized) return normalized;
+  }
+  return null;
+};
+
+const getNestedStringFromObjectKeys = (
+  record: UnknownRecord,
+  keys: string[],
+  nestedKeys: string[] = ["name", "value", "label", "title"],
+): string | null => {
+  for (const key of keys) {
+    const nestedRecord = toRecord(record[key]);
+    if (!nestedRecord) continue;
+    const nestedValue = getStringByKeys(nestedRecord, nestedKeys);
+    if (nestedValue) return nestedValue;
   }
   return null;
 };
@@ -448,10 +538,74 @@ const parseReceiptAnalysis = (raw: unknown): ParsedReceiptAnalysis => {
 
   const preferredRoot = roots.find((candidate) => getItemsFromRoot(candidate).length > 0) ?? roots[0];
   const marketName =
-    getStringByKeys(preferredRoot, ["marketName", "market_name", "merchant", "store", "shop", "vendor"]) ??
+    getStringByKeys(preferredRoot, [
+      "marketName",
+      "market_name",
+      "merchant",
+      "merchantName",
+      "merchant_name",
+      "store",
+      "storeName",
+      "store_name",
+      "shop",
+      "shopName",
+      "shop_name",
+      "vendor",
+      "seller",
+      "retailer",
+      "businessName",
+      "business_name",
+    ]) ??
     roots.map((candidate) =>
-      getStringByKeys(candidate, ["marketName", "market_name", "merchant", "store", "shop", "vendor"]),
+      getStringByKeys(candidate, [
+        "marketName",
+        "market_name",
+        "merchant",
+        "merchantName",
+        "merchant_name",
+        "store",
+        "storeName",
+        "store_name",
+        "shop",
+        "shopName",
+        "shop_name",
+        "vendor",
+        "seller",
+        "retailer",
+        "businessName",
+        "business_name",
+      ]),
     ).find((value): value is string => !!value) ??
+    getNestedStringFromObjectKeys(preferredRoot, [
+      "merchant",
+      "merchantDetails",
+      "merchant_details",
+      "store",
+      "storeDetails",
+      "store_details",
+      "shop",
+      "vendor",
+      "seller",
+      "retailer",
+      "business",
+    ]) ??
+    roots
+      .map((candidate) =>
+        getNestedStringFromObjectKeys(candidate, [
+          "merchant",
+          "merchantDetails",
+          "merchant_details",
+          "store",
+          "storeDetails",
+          "store_details",
+          "shop",
+          "vendor",
+          "seller",
+          "retailer",
+          "business",
+        ]),
+      )
+      .find((value): value is string => !!value) ??
     null;
   const totalCents =
     getCentsByKeys(preferredRoot, [
@@ -514,6 +668,7 @@ const upsertSubcategoryPreset = async (
 const persistAnalyzedReceipt = async (
   db: SQLiteDatabase,
   responseData: unknown,
+  receiptPhotoLink: string | null,
 ): Promise<void> => {
   const context = await resolveSpendingContext(db);
   if (!context) {
@@ -661,7 +816,7 @@ const persistAnalyzedReceipt = async (
   const paymentInsertResult = await db.runAsync(
     `INSERT INTO payments (sum, market_name, source_type, user_id, category_id, receipt_photo_link)
      VALUES (?, ?, ?, ?, ?, ?)`,
-    [paymentTotalCents, parsed.marketName, "receipt", context.userId, paymentCategory.id, null],
+    [paymentTotalCents, parsed.marketName, "receipt", context.userId, paymentCategory.id, receiptPhotoLink],
   );
 
   const paymentId = Number(paymentInsertResult.lastInsertRowId);
@@ -711,8 +866,7 @@ const persistScannedReceiptAsSpending = async (
   receiptUri: string,
   context: SpendingContext,
 ): Promise<void> => {
-  const receiptPhotoLink =
-    receiptUri.startsWith("file:") || receiptUri.startsWith("content:") ? receiptUri : null;
+  const receiptPhotoLink = resolveReceiptPhotoLink(receiptUri);
 
   const paymentInsertResult = await db.runAsync(
     `INSERT INTO payments (sum, market_name, source_type, user_id, category_id, receipt_photo_link)
@@ -763,7 +917,7 @@ export const scanReceiptImages = async (): Promise<ReceiptScanOnlyResult> => {
     return { status: "unavailable_native" };
   }
 
-  const responseType = documentScannerModule.ResponseType?.Base64 ?? "base64";
+  const responseType = documentScannerModule.ResponseType?.ImageFilePath ?? "imageFilePath";
   const cancelStatus = documentScannerModule.ScanDocumentResponseStatus?.Cancel ?? "cancel";
   const result = await documentScannerModule.scanDocument({
     responseType,
@@ -860,8 +1014,13 @@ const loadAnalysisTaxonomy = async (
 
 export const analyzeReceiptWithSupabase = async (
   db: SQLiteDatabase,
-  imageBase64: string,
-): Promise<void> => {
+  imageInput: string,
+): Promise<ReceiptAnalyzeResult> => {
+  const receiptPhotoLink = resolveReceiptPhotoLink(imageInput);
+  const imageBase64 = await resolveImagePayloadBase64(imageInput);
+  if (!imageBase64) {
+    return { status: "failed", reason: "invalid_image_payload" };
+  }
   const { categories } = await loadAnalysisTaxonomy(db);
   const payload = {
     imageBase64,
@@ -887,11 +1046,11 @@ export const analyzeReceiptWithSupabase = async (
         statusText: error.context.statusText,
         body: responseBody,
       });
-      return;
+      return { status: "failed", reason: "http_error" };
     }
 
     console.error(`${RECEIPT_ANALYZE_FUNCTION} error:`, error);
-    return;
+    return { status: "failed", reason: "invoke_error" };
   }
 
   console.log(
@@ -901,9 +1060,11 @@ export const analyzeReceiptWithSupabase = async (
   console.log(`${RECEIPT_ANALYZE_FUNCTION} output:`, JSON.stringify(data, null, 2));
 
   try {
-    await persistAnalyzedReceipt(db, data);
+    await persistAnalyzedReceipt(db, data, receiptPhotoLink);
+    return { status: "saved" };
   } catch (persistError) {
     console.error("Failed saving analyzed receipt output:", persistError);
+    return { status: "failed", reason: "persist_error" };
   }
 };
 
