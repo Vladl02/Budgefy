@@ -1,5 +1,4 @@
 {
-  "$schema": "https://exp.host/--/api/v2/project/configuration/schema/54.0.0",
   "expo": {
     "name": "AP",
     "slug": "AP",
