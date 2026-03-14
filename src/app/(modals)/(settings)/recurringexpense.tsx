@@ -13,7 +13,9 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { useNavigation } from "@react-navigation/native";
 import { SlidingSheet } from "@/src/components/SlidingSheet";
+import { useAppTheme } from "@/src/providers/AppThemeProvider";
 import { Plus, CreditCard, ChevronLeft, Bell, Trash2, Search, Check, ChevronRight, BellRing } from 'lucide-react-native';
 import Svg, { Path } from "react-native-svg";
 import {
@@ -170,7 +172,9 @@ function SimpleBrandIcon({ icon, size = 18 }: { icon: SimpleIcon; size?: number 
 }
 
 export default function RecurringExpense() {
+  const { isDark } = useAppTheme();
   const router = useRouter();
+  const navigation = useNavigation();
   
   // UI States
   const [isAdding, setIsAdding] = useState(false);
@@ -223,7 +227,18 @@ export default function RecurringExpense() {
 
   // --- LOGIC ---
 
-  const handleDismiss = () => router.back();
+  const handleDismiss = () => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+    const parent = navigation.getParent();
+    if (parent?.canGoBack()) {
+      parent.goBack();
+      return;
+    }
+    router.replace("/(tabs)/settings");
+  };
 
   const scheduleReminder = async (title: string, amountStr: string, billDay: string, offset: number) => {
     if (offset === -1) return undefined;
@@ -373,12 +388,12 @@ export default function RecurringExpense() {
 
   const renderCurrencyPicker = () => (
     <View style={styles.pickerContainer}>
-      <View style={styles.searchBar}>
-        <Search size={20} color="#999" />
+      <View style={[styles.searchBar, isDark ? styles.searchBarDark : null]}>
+        <Search size={20} color={isDark ? "#9CA3AF" : "#999"} />
         <TextInput 
-          style={styles.searchInput}
+          style={[styles.searchInput, isDark ? styles.searchInputDark : null]}
           placeholder="Search currency"
-          placeholderTextColor="#999"
+          placeholderTextColor={isDark ? "#9CA3AF" : "#999"}
           value={searchText}
           onChangeText={setSearchText}
           autoFocus
@@ -390,7 +405,7 @@ export default function RecurringExpense() {
         keyboardShouldPersistTaps="handled"
         renderItem={({ item }) => (
           <Pressable 
-            style={styles.currencyRow} 
+            style={[styles.currencyRow, isDark ? styles.currencyRowDark : null]} 
             onPress={() => {
               setCurrency(item);
               setIsSelectingCurrency(false);
@@ -398,13 +413,15 @@ export default function RecurringExpense() {
             }}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <View style={styles.currencyBadge}><Text style={styles.currencyBadgeText}>{item.symbol}</Text></View>
+              <View style={[styles.currencyBadge, isDark ? styles.currencyBadgeDark : null]}>
+                <Text style={[styles.currencyBadgeText, isDark ? styles.currencyBadgeTextDark : null]}>{item.symbol}</Text>
+              </View>
               <View>
-                <Text style={styles.currencyCode}>{item.code}</Text>
-                <Text style={styles.currencyName}>{item.name}</Text>
+                <Text style={[styles.currencyCode, isDark ? styles.currencyCodeDark : null]}>{item.code}</Text>
+                <Text style={[styles.currencyName, isDark ? styles.currencyNameDark : null]}>{item.name}</Text>
               </View>
             </View>
-            {currency.code === item.code && <Check size={20} color="#1F1F1F" />}
+            {currency.code === item.code && <Check size={20} color={isDark ? "#F3F4F6" : "#1F1F1F"} />}
           </Pressable>
         )}
       />
@@ -413,20 +430,26 @@ export default function RecurringExpense() {
 
   return (
     <View style={styles.screenWrapper}>
-      <SlidingSheet onDismiss={handleDismiss} heightPercent={0.85} backdropOpacity={0.4}>
+      <SlidingSheet
+        onDismiss={handleDismiss}
+        heightPercent={0.85}
+        backdropOpacity={0.4}
+        sheetStyle={isDark ? styles.sheetContainerDark : undefined}
+        handleStyle={isDark ? styles.sheetHandleDark : undefined}
+      >
         {(closeSheet) => (
           <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
-            <View style={styles.container}>
+            <View style={[styles.container, isDark ? styles.containerDark : null]}>
               
               {/* Header */}
               {showHeader ? (
                 <View style={styles.header}>
                   <View style={styles.headerSide}>
                     <Pressable onPress={() => isSelectingCurrency ? setIsSelectingCurrency(false) : setIsAdding(false)} hitSlop={10}>
-                      <ChevronLeft size={24} color="#1F1F1F" />
+                      <ChevronLeft size={24} color={isDark ? "#F3F4F6" : "#1F1F1F"} />
                     </Pressable>
                   </View>
-                  <Text style={styles.mainTitle}>
+                  <Text style={[styles.mainTitle, isDark ? styles.mainTitleDark : null]}>
                     {isSelectingCurrency ? "Select Currency" : "Add Payment"}
                   </Text>
                   <View style={styles.headerSide} />
@@ -441,24 +464,24 @@ export default function RecurringExpense() {
                   <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
                     <View style={styles.calendarSection}>
                       <View style={styles.calendarHead}>
-                        <Text style={styles.calendarTitle}>Subscription Calendar</Text>
-                        <Text style={styles.calendarMonth}>{calendarMonthLabel}</Text>
+                        <Text style={[styles.calendarTitle, isDark ? styles.calendarTitleDark : null]}>Subscription Calendar</Text>
+                        <Text style={[styles.calendarMonth, isDark ? styles.calendarMonthDark : null]}>{calendarMonthLabel}</Text>
                       </View>
 
                       <View style={styles.calendarLegendRow}>
                         <View style={styles.calendarLegendItem}>
                           <View style={[styles.calendarLegendDot, styles.calendarLegendDotToday]} />
-                          <Text style={styles.calendarLegendText}>Today</Text>
+                          <Text style={[styles.calendarLegendText, isDark ? styles.calendarLegendTextDark : null]}>Today</Text>
                         </View>
                         <View style={styles.calendarLegendItem}>
                           <View style={[styles.calendarLegendDot, styles.calendarLegendDotDue]} />
-                          <Text style={styles.calendarLegendText}>Due date</Text>
+                          <Text style={[styles.calendarLegendText, isDark ? styles.calendarLegendTextDark : null]}>Due date</Text>
                         </View>
                       </View>
 
                       <View style={styles.calendarWeekRow}>
                         {CALENDAR_WEEK_LABELS.map((label) => (
-                          <Text key={label} style={styles.calendarWeekLabel}>{label}</Text>
+                          <Text key={label} style={[styles.calendarWeekLabel, isDark ? styles.calendarWeekLabelDark : null]}>{label}</Text>
                         ))}
                       </View>
 
@@ -471,27 +494,23 @@ export default function RecurringExpense() {
                           const daySubscriptions = subscriptionsByDay.get(dayOfMonth) ?? [];
                           const visibleSubscriptions = daySubscriptions.slice(0, 3);
                           const hiddenCount = Math.max(daySubscriptions.length - visibleSubscriptions.length, 0);
-                          const isToday = dayOfMonth === todayDayOfMonth;
                           const hasSubscriptions = daySubscriptions.length > 0;
-                          const dayOfWeekIndex = index % 7;
-                          const isWeekend = dayOfWeekIndex === 0 || dayOfWeekIndex === 6;
+                          const isToday = dayOfMonth === todayDayOfMonth;
 
                           return (
                             <View
                               key={`day-${dayOfMonth}`}
                               style={[
                                 styles.calendarDayCell,
-                                isWeekend ? styles.calendarDayCellWeekend : null,
-                                hasSubscriptions ? styles.calendarDayCellActive : null,
-                                isToday ? styles.calendarDayCellToday : null,
+                                styles.calendarDayCellUnified,
+                                isToday ? styles.calendarDayCellCurrent : null,
                               ]}
                             >
                               <View style={styles.calendarDayTopRow}>
                                 <Text
                                   style={[
                                     styles.calendarDayNumber,
-                                    isToday ? styles.calendarDayNumberToday : null,
-                                    hasSubscriptions ? styles.calendarDayNumberOnDark : null,
+                                    styles.calendarDayNumberUnified,
                                   ]}
                                 >
                                   {dayOfMonth}
@@ -536,30 +555,32 @@ export default function RecurringExpense() {
                       </View>
                     </View>
 
-                    <Text style={styles.subtitle}>Manage your automated monthly bills</Text>
+                    <Text style={[styles.subtitle, isDark ? styles.subtitleDark : null]}>Manage your automated monthly bills</Text>
 
-                    <View style={styles.summaryCard}>
+                    <View style={[styles.summaryCard, isDark ? styles.summaryCardDark : null]}>
                       <View>
                         <View style={{flexDirection: 'row', alignItems: 'center', gap: 6}}>
-                           <Text style={styles.summaryLabel}>Total Monthly (Est.)</Text>
+                           <Text style={[styles.summaryLabel, isDark ? styles.summaryLabelDark : null]}>Total Monthly (Est.)</Text>
                            {isLoadingRates && <ActivityIndicator size="small" color="#999" />}
                         </View>
                         <View style={{flexDirection: 'row', alignItems: 'baseline', gap: 4}}>
-                          <Text style={styles.summaryAmount}>{totalMonthlyRON.toFixed(2)}</Text>
-                          <Text style={styles.summaryCurrency}>RON</Text>
+                          <Text style={[styles.summaryAmount, isDark ? styles.summaryAmountDark : null]}>{totalMonthlyRON.toFixed(2)}</Text>
+                          <Text style={[styles.summaryCurrency, isDark ? styles.summaryCurrencyDark : null]}>RON</Text>
                         </View>
-                        <Text style={styles.summaryAnnual}>≈ {annualSpendRON.toFixed(0)} RON per year</Text>
+                        <Text style={[styles.summaryAnnual, isDark ? styles.summaryAnnualDark : null]}>
+                          ≈ {annualSpendRON.toFixed(0)} RON per year
+                        </Text>
                       </View>
-                      <Bell size={22} color="#1F1F1F" strokeWidth={2} />
+                      <Bell size={22} color={isDark ? "#F3F4F6" : "#1F1F1F"} strokeWidth={2} />
                     </View>
 
-                    <Text style={styles.sectionHeader}>Active Subscriptions</Text>
+                    <Text style={[styles.sectionHeader, isDark ? styles.sectionHeaderDark : null]}>Active Subscriptions</Text>
                     
                     {payments.map((item) => {
                       const paymentBrandIcon = resolveBrandIcon(item.name);
 
                       return (
-                        <View key={item.id} style={styles.paymentItem}>
+                        <View key={item.id} style={[styles.paymentItem, isDark ? styles.paymentItemDark : null]}>
                           <View style={[styles.iconContainer, { backgroundColor: item.color + '15' }]}>
                             {paymentBrandIcon ? (
                               <SimpleBrandIcon icon={paymentBrandIcon} size={18} />
@@ -568,9 +589,9 @@ export default function RecurringExpense() {
                             )}
                           </View>
                           <View style={styles.paymentInfo}>
-                            <Text style={styles.paymentName}>{item.name}</Text>
+                            <Text style={[styles.paymentName, isDark ? styles.paymentNameDark : null]}>{item.name}</Text>
                             <View style={{flexDirection: 'row', alignItems: 'center', gap: 4}}>
-                              <Text style={styles.paymentDate}>Day {item.day}</Text>
+                              <Text style={[styles.paymentDate, isDark ? styles.paymentDateDark : null]}>Day {item.day}</Text>
                               {/* Show icon only if notification was successfully set */}
                               {item.notificationId && <BellRing size={12} color="#999" />}
                             </View>
@@ -578,7 +599,9 @@ export default function RecurringExpense() {
                           <View style={{ alignItems: 'flex-end' }}>
                             <Text style={styles.paymentAmount}>-{getSymbol(item.currency)}{item.amount.toFixed(2)}</Text>
                             {item.currency !== 'RON' && (
-                              <Text style={styles.convertedText}>≈ {((item.amount / (exchangeRates[item.currency] || 1))).toFixed(0)} lei</Text>
+                              <Text style={[styles.convertedText, isDark ? styles.convertedTextDark : null]}>
+                                ≈ {((item.amount / (exchangeRates[item.currency] || 1))).toFixed(0)} lei
+                              </Text>
                             )}
                             <Pressable onPress={() => deletePayment(item.id)} style={{marginTop: 6}}>
                               <Trash2 size={16} color="#FFBABA" />
@@ -598,12 +621,14 @@ export default function RecurringExpense() {
 
                 // --- ADD FORM ---
                 <View style={styles.formContainer}>
-                  <Text style={styles.formSubtitle}>Enter details for your new recurring expense</Text>
+                  <Text style={[styles.formSubtitle, isDark ? styles.formSubtitleDark : null]}>
+                    Enter details for your new recurring expense
+                  </Text>
                   
                   <View style={styles.inputGroup}>
-                    <Text style={styles.label}>Service / Bill Name</Text>
+                    <Text style={[styles.label, isDark ? styles.labelDark : null]}>Service / Bill Name</Text>
                     <TextInput 
-                      style={styles.input}
+                      style={[styles.input, isDark ? styles.inputDark : null]}
                       placeholder="e.g. Rent, Gym"
                       placeholderTextColor="#AAA"
                       value={name}
@@ -611,18 +636,20 @@ export default function RecurringExpense() {
                       autoFocus
                     />
                     {draftBrandIcon ? (
-                      <View style={styles.brandPreviewPill}>
+                      <View style={[styles.brandPreviewPill, isDark ? styles.brandPreviewPillDark : null]}>
                         <SimpleBrandIcon icon={draftBrandIcon} size={14} />
-                        <Text style={styles.brandPreviewText}>Detected brand logo</Text>
+                        <Text style={[styles.brandPreviewText, isDark ? styles.brandPreviewTextDark : null]}>
+                          Detected brand logo
+                        </Text>
                       </View>
                     ) : null}
                   </View>
 
                   <View style={styles.rowInputs}>
                     <View style={[styles.inputGroup, { flex: 1 }]}>
-                      <Text style={styles.label}>Amount</Text>
+                      <Text style={[styles.label, isDark ? styles.labelDark : null]}>Amount</Text>
                       <TextInput 
-                        style={styles.input}
+                        style={[styles.input, isDark ? styles.inputDark : null]}
                         placeholder="0.00"
                         placeholderTextColor="#AAA"
                         keyboardType="decimal-pad"
@@ -631,9 +658,9 @@ export default function RecurringExpense() {
                       />
                     </View>
                     <View style={[styles.inputGroup, { flex: 1, marginLeft: 12 }]}>
-                      <Text style={styles.label}>Billing Day</Text>
+                      <Text style={[styles.label, isDark ? styles.labelDark : null]}>Billing Day</Text>
                       <TextInput 
-                        style={styles.input}
+                        style={[styles.input, isDark ? styles.inputDark : null]}
                         placeholder="1-31"
                         placeholderTextColor="#AAA"
                         keyboardType="number-pad"
@@ -645,28 +672,43 @@ export default function RecurringExpense() {
                   </View>
 
                   <View style={styles.inputGroup}>
-                    <Text style={styles.label}>Currency</Text>
-                    <Pressable style={styles.currencyTrigger} onPress={() => setIsSelectingCurrency(true)}>
+                    <Text style={[styles.label, isDark ? styles.labelDark : null]}>Currency</Text>
+                    <Pressable style={[styles.currencyTrigger, isDark ? styles.currencyTriggerDark : null]} onPress={() => setIsSelectingCurrency(true)}>
                       <View style={{flexDirection: 'row', alignItems: 'center', gap: 10}}>
-                        <View style={styles.miniBadge}><Text style={styles.miniBadgeText}>{currency.symbol}</Text></View>
-                        <Text style={styles.currencyTriggerText}>{currency.code} - {currency.name}</Text>
+                        <View style={[styles.miniBadge, isDark ? styles.miniBadgeDark : null]}>
+                          <Text style={[styles.miniBadgeText, isDark ? styles.miniBadgeTextDark : null]}>{currency.symbol}</Text>
+                        </View>
+                        <Text style={[styles.currencyTriggerText, isDark ? styles.currencyTriggerTextDark : null]}>
+                          {currency.code} - {currency.name}
+                        </Text>
                       </View>
-                      <ChevronRight size={20} color="#999" />
+                      <ChevronRight size={20} color={isDark ? "#9CA3AF" : "#999"} />
                     </Pressable>
                   </View>
 
                   <View style={styles.inputGroup}>
-                    <Text style={styles.label}>Notification Reminder</Text>
+                    <Text style={[styles.label, isDark ? styles.labelDark : null]}>Notification Reminder</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap: 8}}>
                       {REMINDER_OPTIONS.map((opt) => {
                         const isSelected = reminderOffset === opt.value;
                         return (
                           <Pressable 
                             key={opt.label}
-                            style={[styles.reminderOption, isSelected && styles.reminderOptionActive]}
+                            style={[
+                              styles.reminderOption,
+                              isDark ? styles.reminderOptionDark : null,
+                              isSelected && styles.reminderOptionActive,
+                              isDark && isSelected ? styles.reminderOptionActiveDark : null,
+                            ]}
                             onPress={() => setReminderOffset(opt.value)}
                           >
-                            <Text style={[styles.reminderText, isSelected && styles.reminderTextActive]}>
+                            <Text
+                              style={[
+                                styles.reminderText,
+                                isDark ? styles.reminderTextDark : null,
+                                isSelected && styles.reminderTextActive,
+                              ]}
+                            >
                               {opt.label}
                             </Text>
                           </Pressable>
@@ -696,16 +738,26 @@ export default function RecurringExpense() {
 const styles = StyleSheet.create({
   screenWrapper: { flex: 1, backgroundColor: "transparent" },
   container: { flex: 1, paddingHorizontal: 20, paddingTop: 16, paddingBottom: Platform.OS === 'ios' ? 40 : 20 },
+  containerDark: { backgroundColor: "#1C1C1D" },
+  sheetContainerDark: { backgroundColor: "#1C1C1D" },
+  sheetHandleDark: { backgroundColor: "#9CA3AF" },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, minHeight: 40 },
   headerSide: { width: 40 },
   mainTitle: { fontSize: 20, fontWeight: "800", color: "#1F1F1F" },
+  mainTitleDark: { color: "#F9FAFB" },
   subtitle: { fontSize: 13, color: "#666", marginTop: 2, marginBottom: 12, textAlign: "center" },
+  subtitleDark: { color: "#9CA3AF" },
   scrollContent: { paddingBottom: 20 },
   summaryCard: { backgroundColor: '#F7F7F7', borderRadius: 16, padding: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, borderWidth: 1, borderColor: '#EEEEEE' },
+  summaryCardDark: { backgroundColor: "#1C1C1D", borderColor: "#2E2E2E" },
   summaryLabel: { fontSize: 12, color: '#666', fontWeight: '700', textTransform: 'uppercase' },
+  summaryLabelDark: { color: "#9CA3AF" },
   summaryAmount: { fontSize: 26, fontWeight: '800', color: '#1F1F1F', marginTop: 4 },
+  summaryAmountDark: { color: "#F9FAFB" },
   summaryCurrency: { fontSize: 16, fontWeight: '600', color: '#999', marginBottom: 2 },
+  summaryCurrencyDark: { color: "#D1D5DB" },
   summaryAnnual: { marginTop: 4, fontSize: 12, fontWeight: '600', color: '#4B5563' },
+  summaryAnnualDark: { color: "#9CA3AF" },
   calendarSection: { marginTop: -2, marginBottom: 12 },
   calendarHead: {
     flexDirection: 'row',
@@ -719,6 +771,7 @@ const styles = StyleSheet.create({
     color: '#0F172A',
     letterSpacing: 0.2,
   },
+  calendarTitleDark: { color: "#F9FAFB" },
   calendarMonth: {
     fontSize: 11,
     fontWeight: '700',
@@ -726,6 +779,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
+  calendarMonthDark: { color: "#D1D5DB" },
   calendarLegendRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -753,6 +807,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#6B7280',
   },
+  calendarLegendTextDark: { color: "#9CA3AF" },
   calendarWeekRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -763,9 +818,10 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 10,
     fontWeight: '700',
-    color: '#9AA2AF',
+    color: '#FFFFFF',
     textTransform: 'uppercase',
   },
+  calendarWeekLabelDark: { color: "#FFFFFF" },
   calendarGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -782,13 +838,27 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
     backgroundColor: '#FFFFFF',
   },
+  calendarDayCellUnified: {
+    borderColor: '#2E2E2E',
+    backgroundColor: '#1C1C1D',
+  },
+  calendarDayCellCurrent: {
+    borderColor: '#FFFFFF',
+  },
+  calendarDayCellDark: {
+    borderColor: '#2E2E2E',
+    backgroundColor: '#1C1C1D',
+  },
   calendarDayCellEmpty: {
-    backgroundColor: 'transparent',
-    borderColor: 'transparent',
     borderWidth: 0,
+    borderColor: 'transparent',
+    backgroundColor: '#1C1C1D',
   },
   calendarDayCellWeekend: {
     backgroundColor: '#FCFCFD',
+  },
+  calendarDayCellWeekendDark: {
+    backgroundColor: '#18181A',
   },
   calendarDayCellActive: {
     backgroundColor: '#1E1E22',
@@ -797,6 +867,10 @@ const styles = StyleSheet.create({
   calendarDayCellToday: {
     borderColor: '#111827',
     backgroundColor: '#F3F4F6',
+  },
+  calendarDayCellTodayDark: {
+    borderColor: '#4B5563',
+    backgroundColor: '#111111',
   },
   calendarDayTopRow: {
     alignItems: 'center',
@@ -808,6 +882,9 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#4B5563',
     textAlign: 'center',
+  },
+  calendarDayNumberUnified: {
+    color: '#FFFFFF',
   },
   calendarDayNumberToday: {
     color: '#111827',
@@ -847,20 +924,28 @@ const styles = StyleSheet.create({
     color: '#E5E7EB',
   },
   sectionHeader: { fontSize: 15, fontWeight: '700', color: '#1F1F1F', marginBottom: 12 },
+  sectionHeaderDark: { color: "#F3F4F6" },
   paymentItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F2F2F2' },
+  paymentItemDark: { backgroundColor: "#1C1C1D", borderBottomColor: "#2E2E2E" },
   iconContainer: { width: 42, height: 42, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 14 },
   paymentInfo: { flex: 1 },
   paymentName: { fontSize: 16, fontWeight: '600', color: '#1F1F1F' },
+  paymentNameDark: { color: "#F3F4F6" },
   paymentDate: { fontSize: 13, color: '#999', marginTop: 2 },
+  paymentDateDark: { color: "#9CA3AF" },
   paymentAmount: { fontSize: 16, fontWeight: '700', color: '#FE5A59' },
   convertedText: { fontSize: 11, color: '#BBB', textAlign: 'right', marginTop: 2 },
+  convertedTextDark: { color: "#9CA3AF" },
   addButton: { flexDirection: 'row', backgroundColor: '#1C1C1E', borderRadius: 16, paddingVertical: 16, justifyContent: 'center', alignItems: 'center', marginTop: 24, gap: 8 },
   addButtonText: { color: 'white', fontSize: 16, fontWeight: '700' },
   formContainer: { flex: 1, marginTop: 10 },
   formSubtitle: { fontSize: 14, color: '#666', marginBottom: 24, textAlign: 'center' },
+  formSubtitleDark: { color: "#9CA3AF" },
   inputGroup: { marginBottom: 20 },
   label: { fontSize: 13, fontWeight: '700', color: '#1F1F1F', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
+  labelDark: { color: "#F3F4F6" },
   input: { backgroundColor: '#F5F5F5', borderRadius: 14, padding: 16, fontSize: 16, color: '#1F1F1F', borderWidth: 1, borderColor: '#EEE' },
+  inputDark: { backgroundColor: "#1C1C1D", color: "#F3F4F6", borderColor: "#2E2E2E" },
   brandPreviewPill: {
     marginTop: 10,
     alignSelf: 'flex-start',
@@ -874,29 +959,48 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
+  brandPreviewPillDark: {
+    backgroundColor: "#1C1C1D",
+    borderColor: "#2E2E2E",
+  },
   brandPreviewText: {
     fontSize: 12,
     fontWeight: '600',
     color: '#4B5563',
   },
+  brandPreviewTextDark: { color: "#D1D5DB" },
   rowInputs: { flexDirection: 'row' },
   saveButton: { backgroundColor: '#1F1F1F', borderRadius: 16, paddingVertical: 18, alignItems: 'center' },
   saveButtonDisabled: { opacity: 0.3 },
   saveButtonText: { color: 'white', fontSize: 16, fontWeight: '700' },
   currencyTrigger: { backgroundColor: '#F5F5F5', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#EEE', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  currencyTriggerDark: { backgroundColor: "#1C1C1D", borderColor: "#2E2E2E" },
   currencyTriggerText: { fontSize: 16, color: '#1F1F1F', fontWeight: '500' },
+  currencyTriggerTextDark: { color: "#F3F4F6" },
   miniBadge: { backgroundColor: '#E0E0E0', width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  miniBadgeDark: { backgroundColor: "#2E2E2E" },
   miniBadgeText: { fontSize: 12, fontWeight: '700', color: '#333' },
+  miniBadgeTextDark: { color: "#F3F4F6" },
   pickerContainer: { flex: 1, marginTop: 10 },
   searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 12, marginBottom: 20, gap: 10 },
+  searchBarDark: { backgroundColor: "#1C1C1D", borderWidth: 1, borderColor: "#2E2E2E" },
   searchInput: { flex: 1, fontSize: 16, color: '#1F1F1F' },
+  searchInputDark: { color: "#F3F4F6" },
   currencyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#F2F2F2' },
+  currencyRowDark: { borderBottomColor: "#2E2E2E" },
   currencyBadge: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center' },
+  currencyBadgeDark: { backgroundColor: "#2E2E2E" },
   currencyBadgeText: { fontSize: 16, fontWeight: '600', color: '#333' },
+  currencyBadgeTextDark: { color: "#F3F4F6" },
   currencyCode: { fontSize: 16, fontWeight: '700', color: '#1F1F1F' },
+  currencyCodeDark: { color: "#F3F4F6" },
   currencyName: { fontSize: 13, color: '#666' },
+  currencyNameDark: { color: "#9CA3AF" },
   reminderOption: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, backgroundColor: '#F5F5F5', marginRight: 4, borderWidth: 1, borderColor: 'transparent' },
+  reminderOptionDark: { backgroundColor: "#1C1C1D", borderColor: "#2E2E2E" },
   reminderOptionActive: { backgroundColor: '#1F1F1F', borderColor: '#1F1F1F' },
+  reminderOptionActiveDark: { backgroundColor: "#000000", borderColor: "#000000" },
   reminderText: { fontSize: 13, fontWeight: '600', color: '#666' },
+  reminderTextDark: { color: "#D1D5DB" },
   reminderTextActive: { color: 'white' },
 });

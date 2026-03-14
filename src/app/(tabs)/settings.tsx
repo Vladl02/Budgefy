@@ -1,6 +1,5 @@
 import {
   Calendar,
-  CalendarDays,
   ChartColumnStacked,
   ChevronLeft,
   ChevronRight,
@@ -9,19 +8,19 @@ import {
   DollarSign,
   Flame,
   Languages,
+  Menu,
   Moon,
-  Pencil,
   PiggyBank,
-  Receipt,
   Repeat,
   ShoppingBasket,
   Trophy,
   User,
   X
 } from 'lucide-react-native';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Animated, Image, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Animated, Image, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SlidingSheet } from '@/src/components/SlidingSheet';
 import { payments, users } from "@/src/db/schema";
 import { useGuardedModalPush } from '@/src/hooks/guardForModals';
@@ -41,9 +40,12 @@ import { eq } from "drizzle-orm";
 import { drizzle, useLiveQuery } from "drizzle-orm/expo-sqlite";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from 'expo-image-picker';
+import { LinearGradient } from "expo-linear-gradient";
 import { useSQLiteContext } from "expo-sqlite";
 import { FlatList } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import type { SortableGridRenderItem } from "react-native-sortables";
+import Sortable from "react-native-sortables";
 
 const CURRENCY_REGION_MAP: Record<string, string> = {
   USD: "US",
@@ -100,6 +102,19 @@ const languageFlag = (languageCode: string): string => {
   return toFlagEmoji(regionCode);
 };
 
+type PreferenceItem = {
+  key: string;
+  kind: "toggle" | "link";
+  label: string;
+  icon: React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
+  color: string;
+  value?: string;
+  onPress: () => void;
+};
+
+const SETTINGS_PREFERENCE_ORDER_STORAGE_KEY = "settings_preferences_order_v1";
+const FIXED_FIRST_PREFERENCE_KEY = "recurring-payments";
+
 export default function Settings() {
   const insets = useSafeAreaInsets();
   const { isDark, setMode } = useAppTheme();
@@ -115,13 +130,12 @@ export default function Settings() {
   const [sheetVisible, setSheetVisible] = useState(false);
   const [activeOption, setActiveOption] = useState<string | null>(null);
   const closeSheet = () => setSheetVisible(false);
-  const [name, setName] = useState("John Doe");
-  const [editingName, setEditingName] = useState(false);
+  const [name] = useState("John Doe");
   const [showProPlans, setShowProPlans] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState("yearly");
   const [progressModal, setProgressModal] = useState<string | null>(null);
+  const [preferenceOrder, setPreferenceOrder] = useState<string[] | null>(null);
   const [streakMonth, setStreakMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
-  const prevNameRef = useRef(name);
   const { pushModal } = useGuardedModalPush();
   const heroAnim = useRef(new Animated.Value(0)).current;
   const upgradeAnim = useRef(new Animated.Value(0)).current;
@@ -148,6 +162,40 @@ export default function Settings() {
       void loadPreferences();
     }, [loadPreferences]),
   );
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const hydratePreferenceOrder = async () => {
+      try {
+        const rawValue = await AsyncStorage.getItem(SETTINGS_PREFERENCE_ORDER_STORAGE_KEY);
+        if (!isMounted) return;
+
+        if (!rawValue) {
+          setPreferenceOrder([]);
+          return;
+        }
+
+        const parsed = JSON.parse(rawValue);
+        if (Array.isArray(parsed)) {
+          setPreferenceOrder(parsed.filter((value): value is string => typeof value === "string"));
+          return;
+        }
+
+        setPreferenceOrder([]);
+      } catch (error) {
+        console.error("Failed to load settings preference order", error);
+        if (isMounted) {
+          setPreferenceOrder([]);
+        }
+      }
+    };
+
+    void hydratePreferenceOrder();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
   const { signOut } = useAuth();
   const usersQuery = db
     .select({
@@ -265,6 +313,54 @@ export default function Settings() {
     : 1;
   const dayKeySet = new Set(dayKeys);
   const today = new Date();
+  const weeklyActivity = useMemo(() => {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
+
+    return Array.from({ length: 7 }, (_, index) => {
+      const dayDate = new Date(startOfWeek.getFullYear(), startOfWeek.getMonth(), startOfWeek.getDate() + index);
+      const dayKey = toDayKey(dayDate) ?? `week-${index}`;
+      const isFuture = dayDate.getTime() > todayStart.getTime();
+      return {
+        key: dayKey,
+        isActive: !isFuture && dayKeySet.has(dayKey),
+      };
+    });
+  }, [dayKeySet]);
+  const scanMilestones = useMemo(
+    () => [
+      { target: 20, tier: "Bronze Tier" },
+      { target: 50, tier: "Silver Tier" },
+      { target: 100, tier: "Gold Tier" },
+    ],
+    [],
+  );
+  const scanMilestoneStatus = useMemo(() => {
+    const nextMilestone = scanMilestones.find((milestone) => receiptsScanned < milestone.target);
+    if (!nextMilestone) {
+      return {
+        progressRatio: 1,
+        message: "Top tier unlocked",
+      };
+    }
+
+    const previousTarget =
+      scanMilestones
+        .filter((milestone) => milestone.target < nextMilestone.target)
+        .at(-1)?.target ?? 0;
+    const range = Math.max(1, nextMilestone.target - previousTarget);
+    const progressRatio = Math.min(1, Math.max(0, (receiptsScanned - previousTarget) / range));
+    const remainingScans = Math.max(0, nextMilestone.target - receiptsScanned);
+
+    return {
+      progressRatio,
+      message: `${remainingScans} more scan${remainingScans === 1 ? "" : "s"} until ${nextMilestone.tier}`,
+    };
+  }, [receiptsScanned, scanMilestones]);
+  const freeScanLimit = 5;
+  const freeScansRemaining = 3;
+  const freeScansRemainingRatio = Math.min(1, Math.max(0, freeScansRemaining / freeScanLimit));
   const languages = [
     { code: 'en', name: 'English' },
     { code: 'es', name: 'Spanish' },
@@ -397,25 +493,6 @@ export default function Settings() {
     if (!result.canceled) {
       setAvatarUri(result.assets[0].uri);
     }
-  };
-
-
-  const beginEditName = () => {
-    prevNameRef.current = name;
-    setEditingName(true);
-  };
-
-  const finishEditName = () => {
-    const trimmed = name.trim();
-    if (!trimmed) {
-      // revert + keep user in edit mode
-      setName(prevNameRef.current);
-      Alert.alert("Name required", "Please enter a name.");
-      return;
-    }
-    setName(trimmed);
-    setEditingName(false);
-    Keyboard.dismiss();
   };
 
   // Helper to render the sheet content based on activeOption
@@ -582,87 +659,159 @@ export default function Settings() {
         );
     }
   };
-  const settingsOptions = [
-    {
-      key: "category-manager",
-      label: "Category Manager",
-      icon: ChartColumnStacked,
-      color: "#57A7FD",
-      onPress: () => openSheet("Category Manager"),
+  const persistPreferenceOrder = useCallback((nextOrder: string[]) => {
+    setPreferenceOrder(nextOrder);
+    void AsyncStorage.setItem(SETTINGS_PREFERENCE_ORDER_STORAGE_KEY, JSON.stringify(nextOrder)).catch((error) => {
+      console.error("Failed to persist settings preference order", error);
+    });
+  }, []);
+
+  const enforcePreferenceConstraints = useCallback((keys: string[]) => {
+    const deduped: string[] = [];
+    keys.forEach((key) => {
+      if (deduped.includes(key)) return;
+      deduped.push(key);
+    });
+
+    const withoutFixed = deduped.filter((key) => key !== FIXED_FIRST_PREFERENCE_KEY);
+    return [FIXED_FIRST_PREFERENCE_KEY, ...withoutFixed];
+  }, []);
+
+  const preferenceItems = useMemo<PreferenceItem[]>(
+    () => [
+      {
+        key: "recurring-payments",
+        kind: "link",
+        label: "Recurring Payments",
+        icon: Repeat,
+        color: "#00DDB7",
+        onPress: () =>
+          pushModal({
+            pathname: "/(modals)/(settings)/recurringexpense",
+          }),
+      },
+      {
+        key: "category-manager",
+        kind: "link",
+        label: "Category Manager",
+        icon: ChartColumnStacked,
+        color: "#57A7FD",
+        onPress: () => openSheet("Category Manager"),
+      },
+      {
+        key: "budget-manager",
+        kind: "link",
+        label: "Budget Manager",
+        icon: CreditCard,
+        color: "#FE5A59",
+        onPress: () =>
+          pushModal({
+            pathname: "/(modals)/(settings)/budget",
+          }),
+      },
+      {
+        key: "saving-manager",
+        kind: "link",
+        label: "Saving Manager",
+        icon: PiggyBank,
+        color: "#FFC83C",
+        onPress: () =>
+          pushModal({
+            pathname: "/(modals)/(settings)/savingsmanager",
+          }),
+      },
+      {
+        key: "shopping-list",
+        kind: "link",
+        label: "Shopping List",
+        icon: ShoppingBasket,
+        color: "#FF8544",
+        onPress: () =>
+          pushModal({
+            pathname: "/(modals)/(settings)/shoppinglist",
+          }),
+      },
+      {
+        key: "start-date",
+        kind: "link",
+        label: "Start Date",
+        icon: Calendar,
+        color: "#C48FEE",
+        onPress: () =>
+          pushModal({
+            pathname: "/(modals)/(settings)/startdate",
+          }),
+      },
+    ],
+    [openSheet, pushModal],
+  );
+
+  const orderedPreferenceItems = useMemo(() => {
+    const keyToItem = new Map(preferenceItems.map((item) => [item.key, item] as const));
+    const defaultOrder = preferenceItems.map((item) => item.key);
+    const sourceOrder = preferenceOrder && preferenceOrder.length > 0 ? preferenceOrder : defaultOrder;
+    const nextOrder: string[] = [];
+
+    sourceOrder.forEach((key) => {
+      if (!keyToItem.has(key) || nextOrder.includes(key)) return;
+      nextOrder.push(key);
+    });
+
+    defaultOrder.forEach((key) => {
+      if (nextOrder.includes(key)) return;
+      nextOrder.push(key);
+    });
+
+    const constrainedOrder = enforcePreferenceConstraints(nextOrder);
+    return constrainedOrder
+      .map((key) => keyToItem.get(key))
+      .filter((item): item is PreferenceItem => Boolean(item));
+  }, [enforcePreferenceConstraints, preferenceItems, preferenceOrder]);
+
+  const handlePreferencesDragEnd = useCallback(
+    ({ data }: { data: PreferenceItem[] }) => {
+      const constrainedKeys = enforcePreferenceConstraints(data.map((item) => item.key));
+      persistPreferenceOrder(constrainedKeys);
     },
-    {
-      key: "budget-manager",
-      label: "Budget Manager",
-      icon: CreditCard,
-      color: "#FE5A59",
-      onPress: () =>
-        pushModal({
-          pathname: "/(modals)/(settings)/budget",
-        }),
+    [enforcePreferenceConstraints, persistPreferenceOrder],
+  );
+
+  const renderPreferenceItem = useCallback<SortableGridRenderItem<PreferenceItem>>(
+    ({ item }) => {
+      const IconComp = item.icon;
+      const pressedStyle = isDark ? styles.optionCardPressedDark : styles.optionCardPressed;
+
+      return (
+        <Pressable
+          style={({ pressed }) => [
+            styles.optionCard,
+            isDark ? styles.optionCardDark : null,
+            pressed ? pressedStyle : null,
+          ]}
+          onPress={item.onPress}
+        >
+          <View style={[styles.optionIconBubble, isDark ? styles.optionIconBubbleDark : null]}>
+            <IconComp size={20} color={item.color} strokeWidth={2.8} />
+          </View>
+          <Text style={[styles.optionText, isDark ? styles.optionTextDark : null]}>{item.label}</Text>
+          <ChevronRight size={18} style={styles.optionChevron} color={isDark ? "#9CA3AF" : "#6B7280"} />
+          <View style={styles.optionRightCluster}>
+            {item.value ? (
+              <View style={[styles.optionValuePill, isDark ? styles.optionValuePillDark : null]}>
+                <Text style={[styles.optionValueText, isDark ? styles.optionValueTextDark : null]}>{item.value}</Text>
+              </View>
+            ) : null}
+            <Sortable.Handle mode="draggable">
+              <View style={[styles.dragHandleWrap, isDark ? styles.dragHandleWrapDark : null]}>
+                <Menu size={14} color={isDark ? "#9CA3AF" : "#9AA2AF"} strokeWidth={2.4} />
+              </View>
+            </Sortable.Handle>
+          </View>
+        </Pressable>
+      );
     },
-    {
-      key: "saving-manager",
-      label: "Saving Manager",
-      icon: PiggyBank,
-      color: "#FFC83C",
-      onPress: () =>
-        pushModal({
-          pathname: "/(modals)/(settings)/savingsmanager",
-        }),
-    },
-    {
-      key: "recurring-payments",
-      label: "Recurring Payments",
-      icon: Repeat,
-      color: "#00DDB7",
-      onPress: () =>
-        pushModal({
-          pathname: "/(modals)/(settings)/recurringexpense",
-        }),
-    },
-    {
-      key: "shopping-list",
-      label: "Shopping List",
-      icon: ShoppingBasket,
-      color: "#FF8544",
-      onPress: () =>
-        pushModal({
-          pathname: "/(modals)/(settings)/shoppinglist",
-        }),
-    },
-    {
-      key: "start-date",
-      label: "Start Date",
-      icon: Calendar,
-      color: "#C48FEE",
-      onPress: () =>
-        pushModal({
-          pathname: "/(modals)/(settings)/startdate",
-        }),
-    },
-    {
-      key: "base-currency",
-      label: "Base Currency",
-      value: baseCurrencyBadge,
-      icon: DollarSign,
-      color: "#FF8544",
-      onPress: () =>
-        pushModal({
-          pathname: "/(modals)/(settings)/currency",
-        }),
-    },
-    {
-      key: "language",
-      label: "Language",
-      value: languageBadge,
-      icon: Languages,
-      color: "#7E57FF",
-      onPress: () =>
-        pushModal({
-          pathname: "/(modals)/(settings)/language",
-        }),
-    },
-  ];
+    [isDark],
+  );
 
   return (
     <Pressable style={[styles.screen, isDark ? styles.screenDark : null]} onPress={Keyboard.dismiss}>
@@ -672,7 +821,11 @@ export default function Settings() {
       >
         <View style={styles.pageHeaderRow}>
           <Text style={[styles.pageTitle, isDark ? styles.pageTitleDark : null]}>Settings</Text>
-          <Pressable onPress={() => void handleSignOut()} style={[styles.signOutButton, isDark ? styles.signOutButtonDark : null]}>
+          <Pressable
+            onPress={() => void handleSignOut()}
+            style={[styles.signOutButton, isDark ? styles.signOutButtonDark : null]}
+            hitSlop={10}
+          >
             <Text style={[styles.signOutButtonText, isDark ? styles.signOutButtonTextDark : null]}>Sign out</Text>
           </Pressable>
         </View>
@@ -700,80 +853,78 @@ export default function Settings() {
               {avatarUri ? (
                 <Image source={{ uri: avatarUri }} style={styles.avatarImage} />
               ) : (
-                <User size={36} color="#000" strokeWidth={2.5} />
+                <User size={30} color="#000" strokeWidth={2.5} />
               )}
             </Pressable>
 
             <View style={styles.nameBlock}>
-              {editingName ? (
-                <TextInput
-                  value={name}
-                  onChangeText={setName}
-                  onBlur={finishEditName}
-                  onSubmitEditing={finishEditName}
-                  autoFocus
-                  style={styles.nameInput}
-                  placeholder="Your name"
-                  placeholderTextColor="#aaa"
-                />
-              ) : (
-                <View style={styles.nameRow}>
-                  <Text style={styles.userName}>{name}</Text>
-                  <Pressable
-                    style={({ pressed }) => [styles.editName, pressed ? styles.editNamePressed : null]}
-                    onPress={beginEditName}
-                    onPressIn={triggerSelectionHaptic}
-                    hitSlop={10}
-                  >
-                    <Pencil size={13} color="#fff" strokeWidth={2.5} />
-                  </Pressable>
-                </View>
-              )}
-              <Text style={styles.nameMeta}>Active for {daysActive} days</Text>
+              <View style={styles.nameRow}>
+                <Text style={styles.userName}>{name}</Text>
+              </View>
             </View>
+            <Pressable
+              style={({ pressed }) => [styles.streakRing, styles.streakRingTopRow, pressed ? styles.progressPressed : null]}
+              onPress={() => openProgressModal("streak")}
+            >
+              <Flame size={15} color="#FF9A5A" />
+              <Text style={styles.streakRingText}>{currentStreak}</Text>
+            </Pressable>
           </View>
 
           <View style={styles.progressHub}>
             <View style={styles.momentumHeader}>
-              <View>
-                <Text style={styles.momentumEyebrow}>Progress Hub</Text>
-                <Text style={styles.momentumSubtext}>Track your consistency and scan activity</Text>
-              </View>
-              <Pressable
-                style={({ pressed }) => [styles.streakRing, pressed ? styles.progressPressed : null]}
-                onPress={() => openProgressModal("streak")}
-              >
-                <Flame size={16} color="#FF8544" />
-                <Text style={styles.streakRingText}>{currentStreak}</Text>
-              </Pressable>
+              <Text style={styles.momentumEyebrow}>Progress Hub</Text>
             </View>
+            <Pressable style={styles.progressWeekRowWrap} onPress={() => openProgressModal("streak")}>
+              <View style={[styles.weekHeatmapRow, styles.weekHeatmapRowHeader]}>
+                {weeklyActivity.map((day) => (
+                  <View
+                    key={day.key}
+                    style={[
+                      styles.weekHeatmapDot,
+                      day.isActive ? styles.weekHeatmapDotActive : null,
+                    ]}
+                  />
+                ))}
+              </View>
+            </Pressable>
 
             <View style={styles.statsTiles}>
               <Pressable
-                style={({ pressed }) => [styles.statsTile, pressed ? styles.progressPressed : null]}
+                style={({ pressed }) => [
+                  styles.statsTile,
+                  pressed ? styles.progressPressed : null,
+                ]}
                 onPress={() => openProgressModal("days")}
               >
-                <CalendarDays size={15} color="#57A7FD" />
                 <Text style={styles.statsTileValue}>{daysActive}</Text>
                 <Text style={styles.statsTileLabel}>Days Active</Text>
               </Pressable>
               <Pressable
-                style={({ pressed }) => [styles.statsTile, pressed ? styles.progressPressed : null]}
+                style={({ pressed }) => [
+                  styles.statsTile,
+                  pressed ? styles.progressPressed : null,
+                ]}
                 onPress={() => openProgressModal("scanned")}
               >
-                <Receipt size={15} color="#00DDB7" />
                 <Text style={styles.statsTileValue}>{receiptsScanned}</Text>
                 <Text style={styles.statsTileLabel}>Scanned</Text>
               </Pressable>
-              <Pressable
-                style={({ pressed }) => [styles.statsTile, pressed ? styles.progressPressed : null]}
-                onPress={() => openProgressModal("best")}
-              >
-                <Trophy size={15} color="#FFC83C" />
-                <Text style={styles.statsTileValue}>{bestStreak}</Text>
-                <Text style={styles.statsTileLabel}>Best Streak</Text>
-              </Pressable>
             </View>
+            <Pressable
+              style={({ pressed }) => [styles.scanMilestoneSection, pressed ? styles.progressPressed : null]}
+              onPress={() => openProgressModal("scanned")}
+            >
+              <View style={styles.scanMilestoneTrack}>
+                <View
+                  style={[
+                    styles.scanMilestoneFill,
+                    { width: `${Math.round(scanMilestoneStatus.progressRatio * 100)}%` },
+                  ]}
+                />
+              </View>
+              <Text style={styles.scanMilestoneText}>{scanMilestoneStatus.message}</Text>
+            </Pressable>
 
           </View>
         </Animated.View>
@@ -797,7 +948,7 @@ export default function Settings() {
           }}
         >
           <View style={styles.upgradeIconWrap}>
-            <Diamond size={17} color="#57A7FD" strokeWidth={2.5} />
+            <Diamond size={16} color="#FF9A5A" strokeWidth={2.4} style={styles.upgradeIcon} />
           </View>
           <View style={styles.upgradeContent}>
             <Text style={styles.upgradeTitle}>Upgrade To Pro</Text>
@@ -808,6 +959,22 @@ export default function Settings() {
           </View>
           <ChevronRight size={16} color="#fff" style={{ marginLeft: 10 }} />
         </Pressable>
+        <View style={[styles.freeScansCard, isDark ? styles.freeScansCardDark : null]}>
+          <View style={styles.freeScansHeaderRow}>
+            <Text style={[styles.freeScansTitle, isDark ? styles.freeScansTitleDark : null]}>Free Scans</Text>
+            <Text style={[styles.freeScansRemainingText, isDark ? styles.freeScansRemainingTextDark : null]}>
+              {freeScansRemaining} of {freeScanLimit} remaining
+            </Text>
+          </View>
+          <View style={[styles.freeScansTrack, isDark ? styles.freeScansTrackDark : null]}>
+            <LinearGradient
+              colors={["#FDE68A", "#FACC15", "#D97706"]}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={[styles.freeScansFill, { width: `${Math.round(freeScansRemainingRatio * 100)}%` }]}
+            />
+          </View>
+        </View>
         </Animated.View>
 
         <Animated.View
@@ -828,61 +995,123 @@ export default function Settings() {
         </View>
 
         <View style={[styles.optionsSection, isDark ? styles.optionsSectionDark : null]}>
+          <Sortable.Grid
+            data={orderedPreferenceItems}
+            keyExtractor={(item) => item.key}
+            columns={1}
+            rowGap={0}
+            hapticsEnabled={false}
+            customHandle
+            dragActivationDelay={180}
+            dropAnimationDuration={120}
+            activeItemScale={1}
+            activeItemOpacity={1}
+            inactiveItemScale={1}
+            inactiveItemOpacity={1}
+            onDragEnd={handlePreferencesDragEnd}
+            renderItem={renderPreferenceItem}
+          />
+        </View>
+        <Text style={[styles.appearanceTitle, isDark ? styles.appearanceTitleDark : null]}>
+          Appearance
+        </Text>
+        <View style={[styles.darkModeSection, styles.stackedStandaloneSection, isDark ? styles.darkModeSectionDark : null]}>
           <Pressable
             style={({ pressed }) => [
               styles.optionCard,
+              styles.darkModeCard,
               isDark ? styles.optionCardDark : null,
-              pressed ? styles.optionCardPressed : null,
+              pressed ? (isDark ? styles.optionCardPressedDark : styles.optionCardPressed) : null,
             ]}
-            onPressIn={triggerSelectionHaptic}
-            onPress={() => {
-              triggerLightImpact();
-              handleToggleDarkMode(!isDark);
-            }}
+            onPress={() => handleToggleDarkMode(!isDark)}
           >
             <View style={[styles.optionIconBubble, isDark ? styles.optionIconBubbleDark : null]}>
               <Moon size={20} color={isDark ? "#FDE68A" : "#374151"} strokeWidth={2.8} />
             </View>
-            <Text style={[styles.optionText, isDark ? styles.optionTextDark : null]}>Dark Mode</Text>
+            <View style={styles.darkModeTextColumn}>
+              <Text style={[styles.optionText, isDark ? styles.optionTextDark : null]}>Dark Mode</Text>
+              <Text style={[styles.darkModeDescription, isDark ? styles.darkModeDescriptionDark : null]}>
+                Use a darker look across the app.
+              </Text>
+            </View>
             <View style={styles.optionSwitchWrap}>
               <Switch
                 value={isDark}
                 onValueChange={handleToggleDarkMode}
-                trackColor={{ false: "#D1D5DB", true: "#4B5563" }}
+                trackColor={{ false: "#D1D5DB", true: "#000000" }}
                 thumbColor="#FFFFFF"
-                ios_backgroundColor="#D1D5DB"
+                ios_backgroundColor={isDark ? "#111111" : "#D1D5DB"}
               />
             </View>
           </Pressable>
-          {settingsOptions.map((option) => {
-            const IconComp = option.icon;
-            return (
-              <Pressable
-                key={option.key}
-                style={({ pressed }) => [
-                  styles.optionCard,
-                  isDark ? styles.optionCardDark : null,
-                  pressed ? styles.optionCardPressed : null,
-                ]}
-                onPressIn={triggerSelectionHaptic}
-                onPress={() => {
-                  triggerLightImpact();
-                  option.onPress();
-                }}
-              >
-                <View style={[styles.optionIconBubble, isDark ? styles.optionIconBubbleDark : null]}>
-                  <IconComp size={20} color={option.color} strokeWidth={2.8} />
-                </View>
-                <Text style={[styles.optionText, isDark ? styles.optionTextDark : null]}>{option.label}</Text>
-                {"value" in option && option.value ? (
-                  <View style={[styles.optionValuePill, isDark ? styles.optionValuePillDark : null]}>
-                    <Text style={[styles.optionValueText, isDark ? styles.optionValueTextDark : null]}>{option.value}</Text>
-                  </View>
-                ) : null}
-                <ChevronRight size={18} style={styles.optionChevron} color={isDark ? "#9CA3AF" : "#6B7280"} />
-              </Pressable>
-            );
-          })}
+        </View>
+        <Text style={[styles.appearanceTitle, isDark ? styles.appearanceTitleDark : null]}>
+          Currency
+        </Text>
+        <View style={[styles.darkModeSection, isDark ? styles.darkModeSectionDark : null]}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.optionCard,
+              styles.darkModeCard,
+              isDark ? styles.optionCardDark : null,
+              pressed ? (isDark ? styles.optionCardPressedDark : styles.optionCardPressed) : null,
+            ]}
+            onPress={() =>
+              pushModal({
+                pathname: "/(modals)/(settings)/currency",
+              })
+            }
+          >
+            <View style={[styles.optionIconBubble, isDark ? styles.optionIconBubbleDark : null]}>
+              <DollarSign size={20} color="#FF8544" strokeWidth={2.8} />
+            </View>
+            <View style={styles.darkModeTextColumn}>
+              <Text style={[styles.optionText, isDark ? styles.optionTextDark : null]}>Base Currency</Text>
+              <Text style={[styles.darkModeDescription, isDark ? styles.darkModeDescriptionDark : null]}>
+                Choose the currency used for totals.
+              </Text>
+            </View>
+            <View style={styles.optionRightCluster}>
+              <View style={[styles.optionValuePill, isDark ? styles.optionValuePillDark : null]}>
+                <Text style={[styles.optionValueText, isDark ? styles.optionValueTextDark : null]}>{baseCurrencyBadge}</Text>
+              </View>
+              <ChevronRight size={18} style={styles.optionChevron} color={isDark ? "#9CA3AF" : "#6B7280"} />
+            </View>
+          </Pressable>
+        </View>
+        <Text style={[styles.appearanceTitle, isDark ? styles.appearanceTitleDark : null]}>
+          Language
+        </Text>
+        <View style={[styles.darkModeSection, styles.lastStandaloneSection, isDark ? styles.darkModeSectionDark : null]}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.optionCard,
+              styles.darkModeCard,
+              isDark ? styles.optionCardDark : null,
+              pressed ? (isDark ? styles.optionCardPressedDark : styles.optionCardPressed) : null,
+            ]}
+            onPress={() =>
+              pushModal({
+                pathname: "/(modals)/(settings)/language",
+              })
+            }
+          >
+            <View style={[styles.optionIconBubble, isDark ? styles.optionIconBubbleDark : null]}>
+              <Languages size={20} color="#7E57FF" strokeWidth={2.8} />
+            </View>
+            <View style={styles.darkModeTextColumn}>
+              <Text style={[styles.optionText, isDark ? styles.optionTextDark : null]}>Language</Text>
+              <Text style={[styles.darkModeDescription, isDark ? styles.darkModeDescriptionDark : null]}>
+                Set your preferred app language.
+              </Text>
+            </View>
+            <View style={styles.optionRightCluster}>
+              <View style={[styles.optionValuePill, isDark ? styles.optionValuePillDark : null]}>
+                <Text style={[styles.optionValueText, isDark ? styles.optionValueTextDark : null]}>{languageBadge}</Text>
+              </View>
+              <ChevronRight size={18} style={styles.optionChevron} color={isDark ? "#9CA3AF" : "#6B7280"} />
+            </View>
+          </Pressable>
         </View>
         </Animated.View>
       </ScrollView>
@@ -948,9 +1177,6 @@ export default function Settings() {
                     <X size={18} color="#111827" />
                   </Pressable>
                 </View>
-                <Text style={styles.progressSubtitle}>
-                  Green days = scanned receipt, red days = no scan.
-                </Text>
                 <View style={styles.streakMonthRow}>
                   <Pressable
                     style={styles.streakMonthBtn}
@@ -985,20 +1211,20 @@ export default function Settings() {
                     const isFuture = date.getTime() > todayStart.getTime();
                     const isBeforeRegistration = !!registrationStart && date.getTime() < registrationStart.getTime();
                     const didScan = dayKeySet.has(key);
-                    const missed = !didScan && !isFuture && !isBeforeRegistration;
+                    const isPlainDay = !didScan || isFuture || isBeforeRegistration;
                     return (
                       <View
                         key={cell.key}
                         style={[
                           styles.streakCell,
                           didScan ? styles.streakCellScanned : null,
-                          missed ? styles.streakCellMissed : null,
+                          isPlainDay ? styles.streakCellPlain : null,
                         ]}
                       >
                         <Text
                           style={[
                             styles.streakCellText,
-                            didScan || missed ? styles.streakCellTextActive : null,
+                            didScan ? styles.streakCellTextActive : null,
                           ]}
                         >
                           {cell.day}
@@ -1013,8 +1239,29 @@ export default function Settings() {
                     <Text style={styles.legendText}>Scanned</Text>
                   </View>
                   <View style={styles.legendItem}>
-                    <View style={[styles.legendDot, { backgroundColor: "#F87171" }]} />
+                    <View style={[styles.legendDot, { backgroundColor: "#9CA3AF" }]} />
                     <Text style={styles.legendText}>Missed</Text>
+                  </View>
+                </View>
+                <View style={styles.streakStatsCard}>
+                  <View style={styles.streakStatItem}>
+                    <View style={styles.streakStatLabelRow}>
+                      <Flame size={13} color="#F59E0B" />
+                      <Text style={styles.streakStatLabel}>Current</Text>
+                    </View>
+                    <Text style={styles.streakStatValue}>
+                      {currentStreak} day{currentStreak === 1 ? "" : "s"}
+                    </Text>
+                  </View>
+                  <View style={styles.streakStatsDivider} />
+                  <View style={styles.streakStatItem}>
+                    <View style={styles.streakStatLabelRow}>
+                      <Trophy size={13} color="#F59E0B" />
+                      <Text style={styles.streakStatLabel}>Best</Text>
+                    </View>
+                    <Text style={styles.streakStatValue}>
+                      {bestStreak} day{bestStreak === 1 ? "" : "s"}
+                    </Text>
                   </View>
                 </View>
               </>
@@ -1024,9 +1271,7 @@ export default function Settings() {
                   <Text style={styles.progressTitle}>
                     {progressModal === "days"
                       ? "Days Active"
-                      : progressModal === "scanned"
-                        ? "Receipts Scanned"
-                        : "Best Streak"}
+                      : "Receipts Scanned"}
                   </Text>
                   <Pressable onPress={closeProgressModal}>
                     <X size={18} color="#111827" />
@@ -1036,17 +1281,9 @@ export default function Settings() {
                   <Text style={styles.progressBodyText}>
                     You have been active for {daysActive} days since registration. Active days are counted from your sign-up date.
                   </Text>
-                ) : progressModal === "scanned" ? (
-                  <Text style={styles.progressBodyText}>
-                    You scanned {receiptsScanned} receipts in total. Keep scanning consistently to improve your streak and insights quality.
-                  </Text>
-                ) : progressModal === "best" ? (
-                  <Text style={styles.progressBodyText}>
-                    Your best streak is {bestStreak} day{bestStreak === 1 ? "" : "s"}. Beat this record by scanning receipts on consecutive days.
-                  </Text>
                 ) : (
                   <Text style={styles.progressBodyText}>
-                    Track your scanning habits to unlock better insights over time.
+                    You scanned {receiptsScanned} receipts in total. Keep scanning consistently to improve your streak and insights quality.
                   </Text>
                 )}
               </>
@@ -1066,12 +1303,12 @@ export default function Settings() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#F3F4F6" },
-  screenDark: { backgroundColor: "#0B0F14" },
+  screenDark: { backgroundColor: "#000000" },
   scrollContent: { paddingHorizontal: 12, paddingTop: 54 },
   pageTitle: {
-    fontSize: 32,
+    fontSize: 19,
     color: "#111827",
-    fontFamily: "Inter_700Bold",
+    fontFamily: "Inter_600SemiBold",
     marginLeft: 4,
   },
   pageTitleDark: {
@@ -1080,43 +1317,40 @@ const styles = StyleSheet.create({
   pageHeaderRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
+    alignItems: "baseline",
     marginBottom: 14,
   },
   signOutButton: {
-    borderWidth: 1,
-    borderColor: "#D1D5DB",
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 2,
+    paddingVertical: 0,
+    backgroundColor: "transparent",
   },
   signOutButtonDark: {
-    backgroundColor: "#111827",
-    borderColor: "#374151",
+    backgroundColor: "transparent",
   },
   signOutButtonText: {
-    color: "#111827",
-    fontSize: 12,
-    fontFamily: "Inter_600SemiBold",
+    color: "rgba(17,24,39,0.6)",
+    fontSize: 13,
+    lineHeight: 18,
+    fontFamily: "Inter_500Medium",
   },
   signOutButtonTextDark: {
-    color: "#F9FAFB",
+    color: "rgba(255,255,255,0.6)",
   },
   profileCard: {
     width: "100%",
     backgroundColor: "#000000",
-    borderRadius: 18,
+    borderRadius: 22,
     paddingHorizontal: 14,
     paddingTop: 14,
     paddingBottom: 14,
   },
   profileTopRow: { flexDirection: "row", alignItems: "center" },
   userProfile: {
-    height: 64,
-    width: 64,
+    height: 56,
+    width: 56,
     backgroundColor: "#fff",
-    borderRadius: 50,
+    borderRadius: 28,
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
@@ -1135,103 +1369,130 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   userName: {
-    color: "#fff",
-    fontSize: 20,
+    color: "#E5E7EB",
+    fontSize: 18,
     fontFamily: "Inter_600SemiBold",
   },
-  editName: {
-    marginLeft: 8,
-    backgroundColor: "rgba(255,255,255,0.15)",
-    borderRadius: 999,
-    padding: 6,
-  },
-  editNamePressed: {
-    transform: [{ scale: 0.95 }],
-    opacity: 0.9,
-  },
-  nameMeta: {
-    marginTop: 3,
-    color: "#A9B2C3",
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-  },
   progressHub: {
-    marginTop: 14,
+    marginTop: 18,
   },
   momentumHeader: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    justifyContent: "flex-start",
+    alignItems: "flex-start",
+    marginBottom: 0,
   },
   momentumEyebrow: {
     color: "#fff",
     fontSize: 20,
     fontFamily: "Inter_700Bold",
   },
-  momentumSubtext: {
-    color: "#B8BBC2",
-    fontSize: 12,
-    marginTop: 4,
-    fontFamily: "Inter_400Regular",
-  },
   streakRing: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     borderWidth: 2,
-    borderColor: "#FF8544",
+    borderColor: "#FF9A5A",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,133,68,0.12)",
+    backgroundColor: "rgba(255,154,90,0.2)",
+    shadowColor: "#FF9A5A",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.34,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  streakRingTopRow: {
+    marginLeft: 10,
+    flexShrink: 0,
   },
   streakRingText: {
-    marginTop: 2,
+    marginTop: 1,
     color: "#fff",
     fontSize: 16,
     fontFamily: "Inter_700Bold",
   },
   statsTiles: {
-    marginTop: 12,
+    marginTop: 10,
+    width: "100%",
     flexDirection: "row",
-    gap: 8,
+    justifyContent: "flex-start",
+    alignItems: "flex-start",
+    columnGap: 18,
   },
   statsTile: {
-    flex: 1,
-    alignItems: "center",
+    minWidth: 108,
+    alignItems: "flex-start",
     justifyContent: "center",
-    paddingVertical: 4,
+    paddingVertical: 2,
+  },
+  progressWeekRowWrap: {
+    marginTop: 10,
+    alignSelf: "flex-start",
   },
   progressPressed: {
     transform: [{ scale: 0.98 }],
     opacity: 0.92,
   },
   statsTileValue: {
-    marginTop: 5,
+    marginTop: 0,
     color: "#fff",
-    fontSize: 18,
+    fontSize: 24,
     fontFamily: "Inter_700Bold",
   },
   statsTileLabel: {
-    marginTop: 2,
-    color: "#B8BBC2",
-    fontSize: 11,
+    marginTop: 1,
+    color: "#8C95A3",
+    fontSize: 10,
     fontFamily: "Inter_400Regular",
+    textAlign: "left",
   },
-  nameInput: {
-    color: "#fff",
-    fontSize: 18,
-    fontFamily: "Inter_600SemiBold",
-    borderBottomWidth: 1,
-    borderBottomColor: "#ffffff55",
-    paddingVertical: 2,
-    minWidth: 140,
+  weekHeatmapRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    marginBottom: 1,
+  },
+  weekHeatmapRowHeader: {
+    justifyContent: "flex-start",
+    marginBottom: 0,
+  },
+  weekHeatmapDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.22)",
+  },
+  weekHeatmapDotActive: {
+    backgroundColor: "#FFFFFF",
+  },
+  scanMilestoneSection: {
+    marginTop: 6,
+  },
+  scanMilestoneTrack: {
+    width: "100%",
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.16)",
+    overflow: "hidden",
+  },
+  scanMilestoneFill: {
+    height: "100%",
+    borderRadius: 999,
+    backgroundColor: "#FFFFFF",
+  },
+  scanMilestoneText: {
+    marginTop: 6,
+    color: "#9CA3AF",
+    fontSize: 11,
+    fontFamily: "Inter_500Medium",
   },
   upgradeCard: {
-    marginTop: 10,
-    backgroundColor: "#000000",
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "rgba(87,167,253,0.34)",
+    marginTop: 12,
+    backgroundColor: "#17181B",
+    borderRadius: 20,
+    borderWidth: 0,
     marginBottom: 14,
     flexDirection: "row",
     paddingHorizontal: 14,
@@ -1239,7 +1500,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
+    shadowOpacity: 0.08,
     shadowRadius: 10,
     elevation: 3,
   },
@@ -1247,16 +1508,69 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.988 }],
     opacity: 0.97,
   },
+  freeScansCard: {
+    marginTop: 10,
+    marginBottom: 16,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 12,
+  },
+  freeScansCardDark: {
+    backgroundColor: "#1C1C1D",
+    borderColor: "#2E2E2E",
+  },
+  freeScansHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  freeScansTitle: {
+    color: "#111827",
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+  },
+  freeScansTitleDark: {
+    color: "#F9FAFB",
+  },
+  freeScansRemainingText: {
+    color: "#6B7280",
+    fontSize: 12,
+    fontFamily: "Inter_500Medium",
+  },
+  freeScansRemainingTextDark: {
+    color: "#9CA3AF",
+  },
+  freeScansTrack: {
+    height: 10,
+    borderRadius: 999,
+    backgroundColor: "#E5E7EB",
+    overflow: "hidden",
+  },
+  freeScansTrackDark: {
+    backgroundColor: "#2E2E2E",
+  },
+  freeScansFill: {
+    height: "100%",
+    borderRadius: 999,
+  },
   upgradeIconWrap: {
     width: 34,
     height: 34,
     borderRadius: 10,
-    backgroundColor: "rgba(87,167,253,0.15)",
+    backgroundColor: "rgba(255,154,90,0.16)",
     borderWidth: 1,
-    borderColor: "rgba(87,167,253,0.42)",
+    borderColor: "rgba(255,154,90,0.46)",
     alignItems: "center",
     justifyContent: "center",
     marginRight: 10,
+  },
+  upgradeIcon: {
+    transform: [{ translateY: 0.5 }],
   },
   upgradeContent: {
     flex: 1,
@@ -1273,16 +1587,16 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
   },
   upgradePill: {
-    paddingHorizontal: 9,
-    paddingVertical: 5,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
     borderRadius: 999,
-    backgroundColor: "rgba(87,167,253,0.16)",
+    backgroundColor: "rgba(250,204,21,0.2)",
     borderWidth: 1,
-    borderColor: "rgba(87,167,253,0.45)",
+    borderColor: "rgba(250,204,21,0.55)",
   },
   upgradePillText: {
-    color: "#57A7FD",
-    fontSize: 10,
+    color: "#FDE68A",
+    fontSize: 11,
     letterSpacing: 0.5,
     fontFamily: "Inter_700Bold",
   },
@@ -1291,6 +1605,7 @@ const styles = StyleSheet.create({
     color: "#111827",
     fontSize: 16,
     fontFamily: "Inter_600SemiBold",
+    marginRight: 10,
   },
   sectionTitleDark: {
     color: "#F9FAFB",
@@ -1305,16 +1620,48 @@ const styles = StyleSheet.create({
     color: "#9CA3AF",
   },
   optionsSection: {
-    marginBottom: 30,
+    marginBottom: 20,
     backgroundColor: "#fff",
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: "#E5E7EB",
     overflow: "hidden",
   },
   optionsSectionDark: {
-    backgroundColor: "#111827",
-    borderColor: "#374151",
+    backgroundColor: "#1C1C1D",
+    borderColor: "#2E2E2E",
+  },
+  appearanceTitle: {
+    marginTop: 0,
+    marginLeft: 4,
+    marginRight: 10,
+    marginBottom: 8,
+    color: "#6B7280",
+    fontSize: 16,
+    fontFamily: "Inter_700Bold",
+  },
+  appearanceTitleDark: {
+    color: "#9CA3AF",
+  },
+  darkModeSection: {
+    marginTop: 0,
+    marginBottom: 14,
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    overflow: "hidden",
+  },
+  darkModeSectionDark: {
+    backgroundColor: "#1C1C1D",
+    borderColor: "#2E2E2E",
+  },
+  stackedStandaloneSection: {
+    marginBottom: 14,
+  },
+  lastStandaloneSection: {
+    marginTop: 0,
+    marginBottom: 30,
   },
   optionCard: {
     minHeight: 60,
@@ -1326,12 +1673,32 @@ const styles = StyleSheet.create({
     borderBottomColor: "#F3F4F6",
   },
   optionCardDark: {
-    backgroundColor: "#111827",
-    borderBottomColor: "#1F2937",
+    backgroundColor: "#1C1C1D",
+    borderBottomColor: "#2E2E2E",
+  },
+  darkModeCard: {
+    borderBottomWidth: 0,
+  },
+  darkModeTextColumn: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  darkModeDescription: {
+    marginTop: 2,
+    color: "#6B7280",
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+  },
+  darkModeDescriptionDark: {
+    color: "#9CA3AF",
   },
   optionCardPressed: {
     transform: [{ scale: 0.992 }],
-    backgroundColor: "#F9FAFB",
+    backgroundColor: "#F1F3F5",
+  },
+  optionCardPressedDark: {
+    transform: [{ scale: 0.992 }],
+    backgroundColor: "#2A2A2C",
   },
   optionIconBubble: {
     width: 36,
@@ -1345,8 +1712,8 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   optionIconBubbleDark: {
-    backgroundColor: "#1F2937",
-    borderColor: "#374151",
+    backgroundColor: "#1C1C1D",
+    borderColor: "#2d2d2d",
   },
   optionText: {
     color: "#111827",
@@ -1362,27 +1729,47 @@ const styles = StyleSheet.create({
   optionValuePill: {
     marginLeft: "auto",
     marginRight: 8,
-    backgroundColor: "#F3F4F6",
+    backgroundColor: "#000000",
     borderWidth: 1,
-    borderColor: "#E5E7EB",
+    borderColor: "#000000",
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
   optionValuePillDark: {
-    backgroundColor: "#1F2937",
-    borderColor: "#374151",
+    backgroundColor: "#000000",
+    borderColor: "#000000",
   },
   optionValueText: {
-    color: "#111827",
+    color: "#FFFFFF",
     fontSize: 12,
     fontFamily: "Inter_600SemiBold",
   },
   optionValueTextDark: {
-    color: "#E5E7EB",
+    color: "#FFFFFF",
+  },
+  optionRightCluster: {
+    marginLeft: "auto",
+    flexDirection: "row",
+    alignItems: "center",
   },
   optionChevron: {
+    marginLeft: 6,
+    marginRight: 4,
     opacity: 0.8,
+  },
+  dragHandleWrap: {
+    marginLeft: 6,
+    marginRight: -6,
+    width: 22,
+    height: 22,
+    borderRadius: 7,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#EEF2F7",
+  },
+  dragHandleWrapDark: {
+    backgroundColor: "#2A2A2C",
   },
   proOverlay: {
     flex: 1,
@@ -1589,17 +1976,17 @@ const styles = StyleSheet.create({
   streakCell: {
     width: "14.2%",
     aspectRatio: 1,
-    borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 6,
-    backgroundColor: "#F3F4F6",
   },
   streakCellScanned: {
     backgroundColor: "#D1FAE5",
+    borderRadius: 10,
   },
-  streakCellMissed: {
-    backgroundColor: "#FEE2E2",
+  streakCellPlain: {
+    backgroundColor: "transparent",
+    borderRadius: 0,
   },
   streakCellText: {
     color: "#6B7280",
@@ -1614,6 +2001,43 @@ const styles = StyleSheet.create({
     marginTop: 8,
     flexDirection: "row",
     gap: 14,
+  },
+  streakStatsCard: {
+    marginTop: 12,
+    borderRadius: 12,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  streakStatItem: {
+    flex: 1,
+    alignItems: "center",
+  },
+  streakStatLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  streakStatLabel: {
+    color: "#6B7280",
+    fontSize: 12,
+    fontFamily: "Inter_500Medium",
+  },
+  streakStatValue: {
+    marginTop: 2,
+    color: "#111827",
+    fontSize: 16,
+    fontFamily: "Inter_700Bold",
+  },
+  streakStatsDivider: {
+    width: 1,
+    alignSelf: "stretch",
+    backgroundColor: "#E5E7EB",
+    marginHorizontal: 10,
   },
   legendItem: {
     flexDirection: "row",

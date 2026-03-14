@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
+import { useNavigation } from "@react-navigation/native";
 import { SlidingSheet } from "@/src/components/SlidingSheet"; // Adjust path as needed
+import { useAppTheme } from "@/src/providers/AppThemeProvider";
 import { useSQLiteContext } from "expo-sqlite";
 import {
   DEFAULT_BASE_CURRENCY,
@@ -46,7 +48,9 @@ const currencyFlag = (currencyCode: string): string => {
 };
 
 export default function LanguageScreen() {
+  const { isDark } = useAppTheme();
   const router = useRouter();
+  const navigation = useNavigation();
   const dbExpo = useSQLiteContext();
   const [selectedCurrency, setSelectedCurrency] = useState(DEFAULT_BASE_CURRENCY);
 
@@ -71,7 +75,16 @@ export default function LanguageScreen() {
 
   // This handles the physical closing of the router modal
   const handleDismiss = () => {
-    router.back();
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+    const parent = navigation.getParent();
+    if (parent?.canGoBack()) {
+      parent.goBack();
+      return;
+    }
+    router.replace("/(tabs)/settings");
   };
 
   return (
@@ -80,10 +93,12 @@ export default function LanguageScreen() {
         onDismiss={handleDismiss} 
         heightPercent={0.6} 
         backdropOpacity={0.4}
+        sheetStyle={isDark ? styles.sheetContainerDark : undefined}
+        handleStyle={isDark ? styles.sheetHandleDark : undefined}
       >
         {(closeSheet) => (
           <View style={styles.container}>
-            <Text style={styles.title}>Select currency</Text>
+            <Text style={[styles.title, isDark ? styles.titleDark : null]}>Select currency</Text>
             
             <ScrollView 
               contentContainerStyle={styles.list} 
@@ -104,10 +119,17 @@ export default function LanguageScreen() {
                       }
                       closeSheet(); // This triggers the animation, then calls handleDismiss
                     }}
-                    style={[styles.row, isActive ? styles.rowActive : null]}
+                    style={[
+                      styles.row,
+                      isDark ? styles.rowDark : null,
+                      isActive ? styles.rowActive : null,
+                      isDark && isActive ? styles.rowActiveDark : null,
+                    ]}
                   >
-                    <Text style={styles.code}>{currencyFlag(option.code)} {option.code}</Text>
-                    <Text style={styles.name}>{option.name}</Text>
+                    <Text style={[styles.code, isDark ? styles.codeDark : null]}>
+                      {currencyFlag(option.code)} {option.code}
+                    </Text>
+                    <Text style={[styles.name, isDark ? styles.nameDark : null]}>{option.name}</Text>
                   </Pressable>
                 );
               })}
@@ -130,12 +152,21 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingBottom: 40, 
   },
+  sheetContainerDark: {
+    backgroundColor: "#1C1C1D",
+  },
+  sheetHandleDark: {
+    backgroundColor: "#9CA3AF",
+  },
   title: {
     fontSize: 18,
     fontWeight: "700",
     color: "#1F1F1F",
     marginBottom: 20,
     textAlign: "center",
+  },
+  titleDark: {
+    color: "#F9FAFB",
   },
   list: {
     gap: 10,
@@ -150,18 +181,33 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     backgroundColor: "#F3F3F3",
   },
+  rowDark: {
+    backgroundColor: "#1C1C1D",
+    borderWidth: 1,
+    borderColor: "#2E2E2E",
+  },
   rowActive: {
     backgroundColor: "#0e162136",
     borderWidth: 1,
     borderColor: "#0E1621",
+  },
+  rowActiveDark: {
+    backgroundColor: "#111111",
+    borderColor: "#3d3d3d",
   },
   code: {
     fontSize: 15,
     fontWeight: "700",
     color: "#1F1F1F",
   },
+  codeDark: {
+    color: "#F9FAFB",
+  },
   name: {
     fontSize: 13,
     color: "#4E4E4E",
+  },
+  nameDark: {
+    color: "#D1D5DB",
   },
 });

@@ -62,7 +62,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   containerDark: {
-    backgroundColor: "#0B0F14",
+    backgroundColor: "#000000",
   },
   iconButton: {
     width: 36,

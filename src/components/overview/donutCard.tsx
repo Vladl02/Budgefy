@@ -233,7 +233,7 @@ const styles = StyleSheet.create({
     width: "100%",
     alignSelf: "stretch",
     borderWidth: 1,
-    borderColor: "#E9ECF3",
+    borderColor: "#000000",
     shadowColor: "#0F172A",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.08,
@@ -241,8 +241,8 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   cardDark: {
-    backgroundColor: "#111827",
-    borderColor: "#374151",
+    backgroundColor: "#1C1C1D",
+    borderColor: "#000000",
   },
   controlsRow: {
     flexDirection: "row",
@@ -307,7 +307,7 @@ const styles = StyleSheet.create({
     borderColor: "#EEF1F6",
   },
   donutCenterDark: {
-    backgroundColor: "#111827",
+    backgroundColor: "#1C1C1D",
     borderColor: "#4B5563",
   },
   donutCenterCompact: {
@@ -359,8 +359,8 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   statCardDark: {
-    backgroundColor: "#1F2937",
-    borderColor: "#374151",
+    backgroundColor: "#2d2d31",
+    borderColor: "#4d4d4d",
   },
   statCardGap: {
     marginLeft: 8,
@@ -397,8 +397,8 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   rowCardDark: {
-    backgroundColor: "#1F2937",
-    borderColor: "#374151",
+    backgroundColor: "#1C1C1D",
+    borderColor: "#353535",
   },
   rowCardPressed: {
     opacity: 0.92,

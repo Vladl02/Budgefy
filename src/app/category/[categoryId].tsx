@@ -3,6 +3,7 @@ import { useAppTheme } from "@/src/providers/AppThemeProvider";
 import { and, desc, eq } from "drizzle-orm";
 import { drizzle, useLiveQuery } from "drizzle-orm/expo-sqlite";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useNavigation } from "@react-navigation/native";
 import { useSQLiteContext } from "expo-sqlite";
 import { ArrowLeft, Store } from "lucide-react-native";
 import { useMemo } from "react";
@@ -31,6 +32,7 @@ const toDate = (value: Date | number | string | null): Date | null => {
 export default function CategoryItemsScreen() {
   const { isDark } = useAppTheme();
   const router = useRouter();
+  const navigation = useNavigation();
   const params = useLocalSearchParams<{ categoryId?: string | string[]; categoryName?: string | string[] }>();
   const rawCategoryId = Array.isArray(params.categoryId) ? params.categoryId[0] : params.categoryId;
   const rawCategoryName = Array.isArray(params.categoryName) ? params.categoryName[0] : params.categoryName;
@@ -104,11 +106,23 @@ export default function CategoryItemsScreen() {
     () => itemsData.reduce((total, item) => total + Number(item.priceCents ?? 0), 0),
     [itemsData],
   );
+  const handleBackPress = () => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+    const parent = navigation.getParent();
+    if (parent?.canGoBack()) {
+      parent.goBack();
+      return;
+    }
+    router.replace("/(tabs)/overview");
+  };
 
   return (
     <View style={[styles.screen, isDark ? styles.screenDark : null]}>
       <View style={styles.header}>
-        <Pressable style={[styles.backBtn, isDark ? styles.backBtnDark : null]} onPress={() => router.back()}>
+        <Pressable style={[styles.backBtn, isDark ? styles.backBtnDark : null]} onPress={handleBackPress}>
           <ArrowLeft size={18} color={isDark ? "#F3F4F6" : "#111827"} />
         </Pressable>
         <View style={styles.headerTextWrap}>

@@ -237,8 +237,8 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   cardDark: {
-    backgroundColor: "#111827",
-    borderColor: "#374151",
+    backgroundColor: "#1C1C1D",
+    borderColor: "#000000",
   },
   cardPressed: {
     transform: [{ scale: 0.992 }],
@@ -271,7 +271,7 @@ const styles = StyleSheet.create({
     color: "#F3F4F6",
   },
   budgetPill: {
-    backgroundColor: "#111827",
+    backgroundColor: "#000000",
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 5,
