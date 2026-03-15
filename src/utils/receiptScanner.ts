@@ -118,7 +118,14 @@ export type ReceiptScanOnlyResult =
   | { status: "unavailable_web" };
 
 export type ReceiptAnalyzeResult =
-  | { status: "saved" }
+  | {
+      status: "saved";
+      saved: {
+        paymentId: number;
+        paymentDateSeconds: number;
+        marketName: string | null;
+      };
+    }
   | { status: "failed"; reason: string };
 
 type DocumentScannerModule = {
@@ -222,6 +229,60 @@ const resolveSpendingContext = async (db: SQLiteDatabase): Promise<SpendingConte
 
 const getCurrentMonthStartMs = (): number =>
   new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
+
+const isMissingSourceTypeColumnError = (error: unknown): boolean => {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return message.includes("source_type") && message.includes("no column");
+};
+
+const insertPaymentWithSourceTypeFallback = async (
+  db: SQLiteDatabase,
+  params: {
+    sumCents: number;
+    marketName: string | null;
+    sourceType: "manual" | "receipt";
+    userId: number;
+    categoryId: number;
+    receiptPhotoLink: string | null;
+    timedAtSeconds: number;
+  },
+) => {
+  try {
+    return await db.runAsync(
+      `INSERT INTO payments (sum, market_name, source_type, user_id, category_id, receipt_photo_link, timed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        params.sumCents,
+        params.marketName,
+        params.sourceType,
+        params.userId,
+        params.categoryId,
+        params.receiptPhotoLink,
+        params.timedAtSeconds,
+      ],
+    );
+  } catch (error) {
+    if (!isMissingSourceTypeColumnError(error)) {
+      throw error;
+    }
+    console.warn("payments.source_type missing, using legacy insert fallback.");
+    return db.runAsync(
+      `INSERT INTO payments (sum, market_name, user_id, category_id, receipt_photo_link, timed_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        params.sumCents,
+        params.marketName,
+        params.userId,
+        params.categoryId,
+        params.receiptPhotoLink,
+        params.timedAtSeconds,
+      ],
+    );
+  }
+};
 
 const toRecord = (value: unknown): UnknownRecord | null => {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -351,6 +412,137 @@ const getCentsByKeys = (record: UnknownRecord, keys: string[]): number | null =>
   return null;
 };
 
+const toLocalNoonDate = (year: number, month: number, day: number): Date | null => {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return null;
+  }
+  const parsed = new Date(year, month - 1, day, 12, 0, 0, 0);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return null;
+  }
+  return parsed;
+};
+
+const normalizeYearPart = (rawValue: string | undefined, fallbackYear: number): number => {
+  if (!rawValue) return fallbackYear;
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed)) return fallbackYear;
+  if (rawValue.length <= 2) {
+    return parsed >= 70 ? 1900 + parsed : 2000 + parsed;
+  }
+  return parsed;
+};
+
+const MONTHS_BY_NAME: Record<string, number> = {
+  jan: 1,
+  january: 1,
+  feb: 2,
+  february: 2,
+  mar: 3,
+  march: 3,
+  apr: 4,
+  april: 4,
+  may: 5,
+  jun: 6,
+  june: 6,
+  jul: 7,
+  july: 7,
+  aug: 8,
+  august: 8,
+  sep: 9,
+  sept: 9,
+  september: 9,
+  oct: 10,
+  october: 10,
+  nov: 11,
+  november: 11,
+  dec: 12,
+  december: 12,
+};
+
+const parseDateWithNamedMonth = (value: string): Date | null => {
+  const nowYear = new Date().getFullYear();
+  const monthFirst = value.match(/^([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:,?\s+(\d{2,4}))?$/);
+  if (monthFirst) {
+    const month = MONTHS_BY_NAME[monthFirst[1].toLowerCase()];
+    const day = Number.parseInt(monthFirst[2], 10);
+    const year = normalizeYearPart(monthFirst[3], nowYear);
+    if (month) {
+      return toLocalNoonDate(year, month, day);
+    }
+  }
+
+  const dayFirst = value.match(/^(\d{1,2})\s+([A-Za-z]{3,9})\.?,?(?:\s+(\d{2,4}))?$/);
+  if (dayFirst) {
+    const day = Number.parseInt(dayFirst[1], 10);
+    const month = MONTHS_BY_NAME[dayFirst[2].toLowerCase()];
+    const year = normalizeYearPart(dayFirst[3], nowYear);
+    if (month) {
+      return toLocalNoonDate(year, month, day);
+    }
+  }
+
+  return null;
+};
+
+const parseDateWithDelimiters = (value: string): Date | null => {
+  const nowYear = new Date().getFullYear();
+  const full = value.match(/^(\d{1,4})[./-](\d{1,2})[./-](\d{1,4})$/);
+  if (full) {
+    const firstRaw = full[1];
+    const secondRaw = full[2];
+    const thirdRaw = full[3];
+    const first = Number.parseInt(firstRaw, 10);
+    const second = Number.parseInt(secondRaw, 10);
+
+    if (firstRaw.length === 4) {
+      return toLocalNoonDate(first, second, Number.parseInt(thirdRaw, 10));
+    }
+
+    const year = normalizeYearPart(thirdRaw, nowYear);
+    let day = first;
+    let month = second;
+
+    if (first <= 12 && second > 12) {
+      month = first;
+      day = second;
+    } else if (first <= 12 && second <= 12) {
+      // Ambiguous dates default to day/month to avoid locale-dependent parsing.
+      day = first;
+      month = second;
+    }
+
+    return toLocalNoonDate(year, month, day);
+  }
+
+  const noYear = value.match(/^(\d{1,2})[./-](\d{1,2})$/);
+  if (noYear) {
+    const first = Number.parseInt(noYear[1], 10);
+    const second = Number.parseInt(noYear[2], 10);
+    let day = first;
+    let month = second;
+
+    if (first <= 12 && second > 12) {
+      month = first;
+      day = second;
+    } else if (first <= 12 && second <= 12) {
+      day = first;
+      month = second;
+    }
+
+    return toLocalNoonDate(nowYear, month, day);
+  }
+
+  return null;
+};
+
 const parseDateValue = (value: unknown): Date | null => {
   if (value instanceof Date) {
     return Number.isNaN(value.getTime()) ? null : value;
@@ -375,6 +567,16 @@ const parseDateValue = (value: unknown): Date | null => {
       return Number.isNaN(parsed.getTime()) ? null : parsed;
     }
 
+    const delimitedDate = parseDateWithDelimiters(trimmed);
+    if (delimitedDate) {
+      return delimitedDate;
+    }
+
+    const namedMonthDate = parseDateWithNamedMonth(trimmed);
+    if (namedMonthDate) {
+      return namedMonthDate;
+    }
+
     if (/^\d{10,13}$/.test(trimmed)) {
       const numeric = Number.parseInt(trimmed, 10);
       if (!Number.isFinite(numeric)) return null;
@@ -383,8 +585,12 @@ const parseDateValue = (value: unknown): Date | null => {
       return Number.isNaN(parsed.getTime()) ? null : parsed;
     }
 
-    const parsed = new Date(trimmed);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
+    // Keep a narrow fallback for explicit timestamp formats only.
+    if (/[Tt]/.test(trimmed) || /(?:Z|[+-]\d{2}:?\d{2})$/.test(trimmed)) {
+      const parsed = new Date(trimmed);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+    return null;
   }
 
   const nestedRecord = toRecord(value);
@@ -769,7 +975,7 @@ const persistAnalyzedReceipt = async (
   db: SQLiteDatabase,
   responseData: unknown,
   receiptPhotoLink: string | null,
-): Promise<void> => {
+): Promise<{ paymentId: number; paymentDateSeconds: number; marketName: string | null }> => {
   const context = await resolveSpendingContext(db);
   if (!context) {
     throw new Error("Cannot persist analyzed receipt: missing user/category context.");
@@ -913,19 +1119,34 @@ const persistAnalyzedReceipt = async (
   );
   const paymentCategory = resolveCategoryForItem(dominantItem);
   const fallbackPaymentDateSeconds = Math.floor(Date.now() / 1000);
-  const parsedPaymentDateSeconds = parsed.paymentDate
-    ? Math.floor(parsed.paymentDate.getTime() / 1000)
+  const normalizedParsedPaymentDate = parsed.paymentDate
+    ? new Date(
+        parsed.paymentDate.getFullYear(),
+        parsed.paymentDate.getMonth(),
+        parsed.paymentDate.getDate(),
+        12,
+        0,
+        0,
+        0,
+      )
+    : null;
+  const parsedPaymentDateSeconds = normalizedParsedPaymentDate
+    ? Math.floor(normalizedParsedPaymentDate.getTime() / 1000)
     : fallbackPaymentDateSeconds;
   const paymentDateSeconds =
     Number.isFinite(parsedPaymentDateSeconds) && parsedPaymentDateSeconds > 0
       ? parsedPaymentDateSeconds
       : fallbackPaymentDateSeconds;
 
-  const paymentInsertResult = await db.runAsync(
-    `INSERT INTO payments (sum, market_name, source_type, user_id, category_id, receipt_photo_link, timed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [paymentTotalCents, parsed.marketName, "receipt", context.userId, paymentCategory.id, receiptPhotoLink, paymentDateSeconds],
-  );
+  const paymentInsertResult = await insertPaymentWithSourceTypeFallback(db, {
+    sumCents: paymentTotalCents,
+    marketName: parsed.marketName,
+    sourceType: "receipt",
+    userId: context.userId,
+    categoryId: paymentCategory.id,
+    receiptPhotoLink,
+    timedAtSeconds: paymentDateSeconds,
+  });
 
   const paymentId = Number(paymentInsertResult.lastInsertRowId);
   if (!Number.isFinite(paymentId) || paymentId <= 0) {
@@ -967,6 +1188,12 @@ const persistAnalyzedReceipt = async (
     itemsCount: items.length,
     itemsTotalCents,
   });
+
+  return {
+    paymentId,
+    paymentDateSeconds,
+    marketName: parsed.marketName ?? null,
+  };
 };
 
 const persistScannedReceiptAsSpending = async (
@@ -976,11 +1203,15 @@ const persistScannedReceiptAsSpending = async (
 ): Promise<void> => {
   const receiptPhotoLink = resolveReceiptPhotoLink(receiptUri);
 
-  const paymentInsertResult = await db.runAsync(
-    `INSERT INTO payments (sum, market_name, source_type, user_id, category_id, receipt_photo_link, timed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [0, "Scanned Receipt", "receipt", context.userId, context.categoryId, receiptPhotoLink, Math.floor(Date.now() / 1000)],
-  );
+  const paymentInsertResult = await insertPaymentWithSourceTypeFallback(db, {
+    sumCents: 0,
+    marketName: "Scanned Receipt",
+    sourceType: "receipt",
+    userId: context.userId,
+    categoryId: context.categoryId,
+    receiptPhotoLink,
+    timedAtSeconds: Math.floor(Date.now() / 1000),
+  });
 
   const paymentId = Number(paymentInsertResult.lastInsertRowId);
   if (!Number.isFinite(paymentId) || paymentId <= 0) {
@@ -1168,8 +1399,8 @@ export const analyzeReceiptWithSupabase = async (
   console.log(`${RECEIPT_ANALYZE_FUNCTION} output:`, JSON.stringify(data, null, 2));
 
   try {
-    await persistAnalyzedReceipt(db, data, receiptPhotoLink);
-    return { status: "saved" };
+    const saved = await persistAnalyzedReceipt(db, data, receiptPhotoLink);
+    return { status: "saved", saved };
   } catch (persistError) {
     console.error("Failed saving analyzed receipt output:", persistError);
     return { status: "failed", reason: "persist_error" };

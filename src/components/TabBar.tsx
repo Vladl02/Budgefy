@@ -4,6 +4,7 @@ import {
   markProcessingReceiptFailed,
   removeProcessingReceipt,
   setProcessingReceiptMessage,
+  updateProcessingReceipt,
 } from "@/src/stores/receiptProcessingStore";
 import {
   analyzeReceiptWithSupabase,
@@ -74,6 +75,18 @@ export function MyTabBar({ state, descriptors, navigation }: BottomTabBarProps) 
 
       if (scanResult.scannedImages.length > 0) {
         const scannedImage = scanResult.scannedImages[0];
+        const reportsRoute = state.routes.find((route) => route.name === "reports");
+        if (reportsRoute) {
+          const event = navigation.emit({
+            type: "tabPress",
+            target: reportsRoute.key,
+            canPreventDefault: true,
+          });
+          if (!event.defaultPrevented) {
+            navigation.navigate(reportsRoute.name, reportsRoute.params);
+          }
+        }
+
         processingReceiptId = addProcessingReceipt({
           receiptPhotoUri: scannedImage,
           message: RECEIPT_PROGRESS_MESSAGES[0],
@@ -90,9 +103,18 @@ export function MyTabBar({ state, descriptors, navigation }: BottomTabBarProps) 
         clearProgressInterval();
 
         if (analyzeResult.status === "saved") {
-          setProcessingReceiptMessage(processingReceiptId, "Done");
-          const idToRemove = processingReceiptId;
-          setTimeout(() => removeProcessingReceipt(idToRemove), 500);
+          const paymentDate = new Date(analyzeResult.saved.paymentDateSeconds * 1000);
+          const monthLabel = paymentDate.toLocaleDateString("en-US", {
+            month: "long",
+            year: "numeric",
+          });
+          const merchantLabel = analyzeResult.saved.marketName?.trim() || "receipt";
+
+          updateProcessingReceipt(processingReceiptId, {
+            status: "processed",
+            title: "Receipt added",
+            comment: `${merchantLabel} • ${monthLabel}`,
+          });
           processingReceiptId = null;
         } else {
           markProcessingReceiptFailed(processingReceiptId, "Could not analyze this receipt. Please try again.");
@@ -114,7 +136,7 @@ export function MyTabBar({ state, descriptors, navigation }: BottomTabBarProps) 
       clearProgressInterval();
       scanLockRef.current = false;
     }
-  }, [db]);
+  }, [db, navigation, state.routes]);
 
   return (
     <View style={[styles.tabbar, { backgroundColor: appColors.tabBar, borderColor: appColors.tabBarBorder, bottom: insets.bottom + 10 }]}>

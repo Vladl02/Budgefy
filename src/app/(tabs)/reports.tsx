@@ -3,12 +3,12 @@ import { SelectionModal } from "@/src/components/Reports/SelectionModal";
 import { STATUS_CONFIG } from "@/src/components/Reports/constants";
 import type { ReceiptItem } from "@/src/components/Reports/types";
 import { CATEGORY_STYLES, resolveCategoryIconKey } from "@/src/components/overview/category";
-import { categories as categoriesTable, payments as paymentsTable, users } from "@/src/db/schema";
+import { categories as categoriesTable, payments as paymentsTable } from "@/src/db/schema";
 import { useAppTheme } from "@/src/providers/AppThemeProvider";
 import { useProcessingReceiptsStore } from "@/src/stores/receiptProcessingStore";
 import { useIsFocused } from "@react-navigation/native";
 import { FlashList } from "@shopify/flash-list";
-import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { drizzle, useLiveQuery } from "drizzle-orm/expo-sqlite";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSQLiteContext } from "expo-sqlite";
@@ -64,7 +64,7 @@ const CURRENCY_FORMAT_OPTIONS: Intl.NumberFormatOptions = {
 };
 const TOTAL_SPEND_ANIMATION_DELAY_MS = 140;
 const TOTAL_SPEND_ANIMATION_DURATION_MS = 820;
-const MONTH_SWITCH_FALLBACK_MS = 20;
+const MONTH_SWITCH_FALLBACK_MS = 420;
 const formatCurrencyValue = (value: number): string => value.toLocaleString("en-US", CURRENCY_FORMAT_OPTIONS);
 let lastKnownTotalSpendValue: number | null = null;
 const parseAmountValue = (rawAmount: string): number => {
@@ -91,9 +91,24 @@ const parseAmountValue = (rawAmount: string): number => {
 };
 const parseReceiptAmount = (amount: string): number => parseAmountValue(amount);
 const toMonthStart = (date: Date): Date => new Date(date.getFullYear(), date.getMonth(), 1);
-const isInMonth = (value: Date, monthStart: Date): boolean =>
-  value.getFullYear() === monthStart.getFullYear() && value.getMonth() === monthStart.getMonth();
 const getSafeDate = (value: Date | number | string | null | undefined): Date => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const ms = value >= 1_000_000_000_000 ? value : value * 1000;
+    const parsedFromNumber = new Date(ms);
+    return Number.isNaN(parsedFromNumber.getTime()) ? new Date() : parsedFromNumber;
+  }
+
+  if (typeof value === "string" && /^\d{10,13}$/.test(value.trim())) {
+    const numeric = Number.parseInt(value.trim(), 10);
+    if (Number.isFinite(numeric)) {
+      const ms = value.trim().length === 13 ? numeric : numeric * 1000;
+      const parsedFromNumericString = new Date(ms);
+      if (!Number.isNaN(parsedFromNumericString.getTime())) {
+        return parsedFromNumericString;
+      }
+    }
+  }
+
   if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
     const [yearRaw, monthRaw, dayRaw] = value.split("-");
     const year = Number.parseInt(yearRaw, 10);
@@ -117,7 +132,6 @@ const toLocalDateKey = (value: Date | number | string | null | undefined): strin
   const day = String(safeDate.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 };
-
 type ReceiptGroup = {
   id: string;
   fullDate: string;
@@ -142,6 +156,7 @@ type ReportsListHeaderProps = {
   currentMonthLabel: string;
   onOpenMonthPicker: () => void;
   totalSpend: TotalSpendAnimationProps;
+  processingWidget: React.ReactNode;
   trendColor: string;
   trendBackgroundColor: string;
   trendLabel: string;
@@ -156,6 +171,7 @@ function ReportsListHeader({
   currentMonthLabel,
   onOpenMonthPicker,
   totalSpend,
+  processingWidget,
   trendColor,
   trendBackgroundColor,
   trendLabel,
@@ -242,6 +258,8 @@ function ReportsListHeader({
             </Text>
           </TouchableOpacity>
         </View>
+
+        {processingWidget ? <View style={styles.processingWidgetWrap}>{processingWidget}</View> : null}
       </View>
 
       <View style={styles.controlsSection}>
@@ -268,6 +286,82 @@ type ReceiptRowProps = {
   isLast: boolean;
   onOpen: (receipt: ReceiptItem) => void;
 };
+
+type ProcessingStatusWidgetProps = {
+  processingReceipt: ReceiptItem | null;
+  latestResultReceipt: ReceiptItem | null;
+  isDark: boolean;
+};
+
+function ProcessingStatusWidget({ processingReceipt, latestResultReceipt, isDark }: ProcessingStatusWidgetProps) {
+  const scanProgress = useRef(new Animated.Value(0)).current;
+  const isScanning = Boolean(processingReceipt);
+  const activeReceipt = processingReceipt ?? latestResultReceipt;
+
+  useEffect(() => {
+    if (!isScanning) {
+      return;
+    }
+    scanProgress.setValue(0);
+    const loop = Animated.loop(
+      Animated.timing(scanProgress, {
+        toValue: 1,
+        duration: 1200,
+        easing: Easing.inOut(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+
+    return () => {
+      loop.stop();
+    };
+  }, [isScanning, scanProgress]);
+
+  if (!activeReceipt) {
+    return null;
+  }
+
+  const scanTranslateX = scanProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-120, 120],
+  });
+  const pulseOpacity = scanProgress.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0.35, 0.85, 0.35],
+  });
+
+  return (
+    <View style={[styles.processingWidgetCard, isDark ? styles.processingWidgetCardDark : null]}>
+      <View style={[styles.processingWidgetIconWrap, isDark ? styles.processingWidgetIconWrapDark : null]}>
+        {isScanning ? (
+          <ActivityIndicator size="small" color={isDark ? "#93C5FD" : "#2563EB"} />
+        ) : (
+          <Text style={[styles.processingWidgetDoneIcon, isDark ? styles.processingWidgetDoneIconDark : null]}>✓</Text>
+        )}
+      </View>
+      <View style={styles.processingWidgetBody}>
+        <Text style={[styles.processingWidgetTitle, isDark ? styles.processingWidgetTitleDark : null]} numberOfLines={1}>
+          {isScanning ? "Scanning receipt..." : "Receipt added"}
+        </Text>
+        <Text style={[styles.processingWidgetSubtitle, isDark ? styles.processingWidgetSubtitleDark : null]} numberOfLines={1}>
+          {activeReceipt.comment?.trim() || (isScanning ? "Analyzing items..." : "Saved to history")}
+        </Text>
+        {isScanning ? (
+          <Animated.View style={[styles.processingWidgetTrack, isDark ? styles.processingWidgetTrackDark : null, { opacity: pulseOpacity }]}>
+            <Animated.View
+              style={[
+                styles.processingWidgetSweep,
+                isDark ? styles.processingWidgetSweepDark : null,
+                { transform: [{ translateX: scanTranslateX }] },
+              ]}
+            />
+          </Animated.View>
+        ) : null}
+      </View>
+    </View>
+  );
+}
 
 function ReceiptRow({ receipt, isDark, isLast, onOpen }: ReceiptRowProps) {
   const statusConfig = STATUS_CONFIG[receipt.status] || STATUS_CONFIG.processed;
@@ -376,21 +470,10 @@ export default function Reports() {
 
   const dbExpo = useSQLiteContext();
   const db = useMemo(() => drizzle(dbExpo), [dbExpo]);
-  const activeUserSubquery = useMemo(
-    () =>
-      db
-        .select({ id: users.id })
-        .from(users)
-        .orderBy(users.id)
-        .limit(1)
-        .as("active_user"),
-    [db],
-  );
 
   const monthWindowPaymentsQuery = useMemo(
     () => {
-      const previousMonthStart = new Date(selectedMonthStart.getFullYear(), selectedMonthStart.getMonth() - 1, 1);
-      const selectedMonthEnd = new Date(selectedMonthStart.getFullYear(), selectedMonthStart.getMonth() + 1, 1);
+      const paymentMonthKeyExpr = sql<string>`strftime('%Y-%m', ${paymentsTable.timedAt}, 'unixepoch', 'localtime')`;
 
       return db
         .select({
@@ -403,14 +486,13 @@ export default function Reports() {
           categoryName: categoriesTable.categoryName,
           categoryColor: categoriesTable.color,
           categoryIcon: categoriesTable.icon,
+          monthKey: paymentMonthKeyExpr,
         })
         .from(paymentsTable)
-        .innerJoin(activeUserSubquery, eq(paymentsTable.userId, activeUserSubquery.id))
         .leftJoin(categoriesTable, eq(paymentsTable.categoryId, categoriesTable.id))
-        .where(and(gte(paymentsTable.timedAt, previousMonthStart), lt(paymentsTable.timedAt, selectedMonthEnd)))
         .orderBy(desc(paymentsTable.timedAt), desc(paymentsTable.id));
     },
-    [activeUserSubquery, db, selectedMonthStart],
+    [db],
   );
   const {
     data: monthWindowPaymentsData,
@@ -427,10 +509,9 @@ export default function Reports() {
           monthStart: categoriesTable.monthStart,
         })
         .from(categoriesTable)
-        .innerJoin(activeUserSubquery, eq(categoriesTable.userId, activeUserSubquery.id))
         .where(eq(categoriesTable.monthStart, selectedMonthStart))
         .orderBy(categoriesTable.id),
-    [activeUserSubquery, db, selectedMonthStart],
+    [db, selectedMonthStart],
   );
   const {
     data: categoriesData,
@@ -439,18 +520,16 @@ export default function Reports() {
 
   const paymentMonthsQuery = useMemo(
     () => {
-      const monthStartExpr = sql<number>`
-        (cast(strftime('%s', strftime('%Y-%m-01', ${paymentsTable.timedAt}, 'unixepoch')) as integer) * 1000)
-      `;
+      const yearExpr = sql<number>`cast(strftime('%Y', ${paymentsTable.timedAt}, 'unixepoch', 'localtime') as integer)`;
+      const monthExpr = sql<number>`cast(strftime('%m', ${paymentsTable.timedAt}, 'unixepoch', 'localtime') as integer)`;
 
       return db
-        .select({ monthStart: monthStartExpr })
+        .select({ year: yearExpr, month: monthExpr })
         .from(paymentsTable)
-        .innerJoin(activeUserSubquery, eq(paymentsTable.userId, activeUserSubquery.id))
-        .groupBy(monthStartExpr)
-        .orderBy(desc(monthStartExpr));
+        .groupBy(yearExpr, monthExpr)
+        .orderBy(desc(yearExpr), desc(monthExpr));
     },
-    [activeUserSubquery, db],
+    [db],
   );
   const {
     data: paymentMonthsData,
@@ -461,10 +540,9 @@ export default function Reports() {
   const isReportsLoading = isInitialDataLoading || isMonthSwitching;
 
   const dbReceipts = useMemo<ReceiptItem[]>(() => {
+    const selectedMonthKey = `${selectedMonthStart.getFullYear()}-${String(selectedMonthStart.getMonth() + 1).padStart(2, "0")}`;
     return monthWindowPaymentsData
-      .filter((payment) =>
-        isInMonth(getSafeDate(payment.paymentDate as Date | number | string | null | undefined), selectedMonthStart),
-      )
+      .filter((payment) => payment.monthKey === selectedMonthKey)
       .map((payment) => {
         const safeDate = getSafeDate(payment.paymentDate as Date | number | string | null | undefined);
         const fullDate = toLocalDateKey(safeDate);
@@ -499,9 +577,8 @@ export default function Reports() {
 
   const monthReceipts = useMemo(() => {
     return receipts
-      .filter((item) => isInMonth(getSafeDate(item.fullDate), selectedMonthStart))
       .sort((a, b) => getSafeDate(b.fullDate).getTime() - getSafeDate(a.fullDate).getTime());
-  }, [receipts, selectedMonthStart]);
+  }, [receipts]);
 
   const totalSpendValue = useMemo(() => {
     return monthReceipts.reduce((sum, item) => {
@@ -575,6 +652,7 @@ export default function Reports() {
     }
     pendingMonthStartRef.current = null;
     monthSwitchCommittedRef.current = true;
+    setIsMonthSwitching(true);
     setSelectedMonthStart((prev) =>
       prev.getTime() === pendingMonthStart.getTime() ? prev : pendingMonthStart,
     );
@@ -669,11 +747,11 @@ export default function Reports() {
 
   const previousMonthDbTotalValue = useMemo(
     () => {
-      const previousMonthStart = new Date(selectedMonthStart.getFullYear(), selectedMonthStart.getMonth() - 1, 1);
+      const previousMonth = new Date(selectedMonthStart.getFullYear(), selectedMonthStart.getMonth() - 1, 1);
+      const previousMonthKey = `${previousMonth.getFullYear()}-${String(previousMonth.getMonth() + 1).padStart(2, "0")}`;
 
       return monthWindowPaymentsData.reduce((sum, payment) => {
-        const paymentDate = getSafeDate(payment.paymentDate as Date | number | string | null | undefined);
-        if (!isInMonth(paymentDate, previousMonthStart)) return sum;
+        if (payment.monthKey !== previousMonthKey) return sum;
         return sum + Number(payment.sumCents ?? 0) / 100;
       }, 0);
     },
@@ -693,6 +771,17 @@ export default function Reports() {
     maximumFractionDigits: 2,
   });
   const trendLabel = `${trendSign}RON ${trendAbsValue}`;
+  const activeProcessingReceipt =
+    processingReceipts.find((item) => item.status === "processing") ?? null;
+  const latestResultProcessingReceipt =
+    processingReceipts.find((item) => item.status !== "processing") ?? null;
+  const processingWidget = (
+    <ProcessingStatusWidget
+      processingReceipt={activeProcessingReceipt}
+      latestResultReceipt={latestResultProcessingReceipt}
+      isDark={isDark}
+    />
+  );
 
   const filteredReceipts = useMemo(() => {
     const normalizedSearch = searchQuery.trim().toLowerCase();
@@ -763,9 +852,13 @@ export default function Reports() {
     addMonth(selectedMonthStart);
     addMonth(new Date());
     receipts.forEach((item) => addMonth(getSafeDate(item.fullDate)));
-    paymentMonthsData.forEach((item) =>
-      addMonth(getSafeDate(item.monthStart as Date | number | string | null | undefined)),
-    );
+    paymentMonthsData.forEach((item) => {
+      const year = Number(item.year);
+      const month = Number(item.month);
+      if (Number.isFinite(year) && Number.isFinite(month) && month >= 1 && month <= 12) {
+        addMonth(new Date(year, month - 1, 1));
+      }
+    });
 
     return Array.from(monthMap.values()).sort((a, b) => b.getTime() - a.getTime());
   }, [paymentMonthsData, receipts, selectedMonthStart]);
@@ -781,6 +874,9 @@ export default function Reports() {
   }, [availableMonthStarts]);
 
   function handleOpenReceipt(item: ReceiptItem) {
+    if (item.status === "processing") {
+      return;
+    }
     setSelectedReceipt(item);
     setModalVisible(true);
   }
@@ -834,7 +930,6 @@ export default function Reports() {
       monthSwitchCommittedRef.current = false;
       monthSwitchTargetStartMsRef.current = normalizedMonth.getTime();
       monthSwitchStartUpdatedAtRef.current = monthWindowPaymentsUpdatedAt?.getTime() ?? 0;
-      setIsMonthSwitching(true);
       pendingMonthStartRef.current = normalizedMonth;
     }
   }
@@ -908,6 +1003,7 @@ export default function Reports() {
                 currentMonthLabel={currentMonthLabel}
                 onOpenMonthPicker={() => setShowMonthPicker(true)}
                 totalSpend={totalSpendAnimation}
+                processingWidget={processingWidget}
                 trendColor={trendColor}
                 trendBackgroundColor={trendBackgroundColor}
                 trendLabel={trendLabel}
@@ -1433,6 +1529,81 @@ const styles = StyleSheet.create({
   groupStatusText: {
     fontSize: 11,
     fontWeight: "600",
+  },
+  processingWidgetWrap: {
+    marginTop: 10,
+  },
+  processingWidgetCard: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 14,
+    backgroundColor: "#EEF4FF",
+  },
+  processingWidgetCardDark: {
+    backgroundColor: "#0F172A",
+  },
+  processingWidgetIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: "#DBEAFE",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  processingWidgetIconWrapDark: {
+    backgroundColor: "#1E293B",
+  },
+  processingWidgetDoneIcon: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#1D4ED8",
+  },
+  processingWidgetDoneIconDark: {
+    color: "#93C5FD",
+  },
+  processingWidgetBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  processingWidgetTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#1E3A8A",
+    marginBottom: 2,
+  },
+  processingWidgetTitleDark: {
+    color: "#BFDBFE",
+  },
+  processingWidgetSubtitle: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#1D4ED8",
+    marginBottom: 7,
+  },
+  processingWidgetSubtitleDark: {
+    color: "#93C5FD",
+  },
+  processingWidgetTrack: {
+    height: 6,
+    borderRadius: 999,
+    overflow: "hidden",
+    backgroundColor: "#BFDBFE",
+    justifyContent: "center",
+  },
+  processingWidgetTrackDark: {
+    backgroundColor: "#1E3A8A",
+  },
+  processingWidgetSweep: {
+    width: 70,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: "#2563EB",
+  },
+  processingWidgetSweepDark: {
+    backgroundColor: "#93C5FD",
   },
   groupRowDivider: {
     height: 1,

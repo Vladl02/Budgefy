@@ -122,6 +122,14 @@ const getOperatorSymbol = (operator: CalcOperator | null): string => {
   }
 };
 
+const isMissingSourceTypeColumnError = (error: unknown): boolean => {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return message.includes("source_type") && message.includes("no column");
+};
+
 export default function AddExpense() {
   const { isDark } = useAppTheme();
   const { cacheVersion } = useRecommendationStore();
@@ -674,11 +682,24 @@ export default function AddExpense() {
             return;
           }
 
-          const paymentResult = await dbExpo.runAsync(
-            `INSERT INTO payments (sum, market_name, source_type, user_id, category_id, timed_at)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            [amountInCents, marketName, "manual", selectedCategoryUserId, resolvedCategoryId, Math.floor(Date.now() / 1000)],
-          );
+          let paymentResult;
+          try {
+            paymentResult = await dbExpo.runAsync(
+              `INSERT INTO payments (sum, market_name, source_type, user_id, category_id, timed_at)
+               VALUES (?, ?, ?, ?, ?, ?)`,
+              [amountInCents, marketName, "manual", selectedCategoryUserId, resolvedCategoryId, Math.floor(Date.now() / 1000)],
+            );
+          } catch (paymentInsertError) {
+            if (!isMissingSourceTypeColumnError(paymentInsertError)) {
+              throw paymentInsertError;
+            }
+            console.warn("payments.source_type missing, using legacy insert fallback.");
+            paymentResult = await dbExpo.runAsync(
+              `INSERT INTO payments (sum, market_name, user_id, category_id, timed_at)
+               VALUES (?, ?, ?, ?, ?)`,
+              [amountInCents, marketName, selectedCategoryUserId, resolvedCategoryId, Math.floor(Date.now() / 1000)],
+            );
+          }
 
           const paymentId = Number(paymentResult.lastInsertRowId);
           if (!Number.isFinite(paymentId) || paymentId <= 0) {

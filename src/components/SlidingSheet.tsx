@@ -63,7 +63,7 @@ export function SlidingSheet({
           scheduleOnRN(finishDismiss);
         }
       };
-      const dismissTarget = fitContent ? height : fixedSheetHeight;
+      const dismissTarget = fitContent ? Math.max(1, dragLimit.value) : fixedSheetHeight;
 
       if (typeof velocityY === "number") {
         translateY.value = withSpring(
@@ -85,17 +85,21 @@ export function SlidingSheet({
         onFinish
       );
     },
-    [closing, finishDismiss, fitContent, fixedSheetHeight, height, translateY]
+    [closing, dragLimit, finishDismiss, fitContent, fixedSheetHeight, translateY]
   );
 
   useEffect(() => {
     const entryStart = fitContent ? height : fixedSheetHeight;
+    closing.value = false;
     dragLimit.value = entryStart;
     translateY.value = entryStart;
-    requestAnimationFrame(() => {
+    const frame = requestAnimationFrame(() => {
       translateY.value = withTiming(0, { duration: 260, easing: Easing.out(Easing.cubic) });
     });
-  }, [dragLimit, fitContent, fixedSheetHeight, height, translateY]);
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [closing, dragLimit, fitContent, fixedSheetHeight, height, translateY]);
 
   const panGesture = useMemo(() => {
     return Gesture.Pan()
@@ -108,7 +112,22 @@ export function SlidingSheet({
         const threshold = limit * closeThreshold;
         const shouldClose = event.translationY > threshold || event.velocityY > 1200;
         if (shouldClose) {
-          scheduleOnRN(requestClose, event.velocityY);
+          if (closing.value) return;
+          closing.value = true;
+          translateY.value = withSpring(
+            limit,
+            {
+              damping: 24,
+              stiffness: 260,
+              velocity: event.velocityY,
+              overshootClamping: true,
+            },
+            (finished) => {
+              if (finished) {
+                scheduleOnRN(finishDismiss);
+              }
+            }
+          );
         } else {
           translateY.value = withSpring(0, {
             damping: 24,
@@ -118,7 +137,7 @@ export function SlidingSheet({
           });
         }
       });
-  }, [closeThreshold, dragLimit, requestClose, translateY]);
+  }, [closeThreshold, closing, dragLimit, finishDismiss, translateY]);
 
   const backdropAnimatedStyle = useAnimatedStyle(() => {
     const limit = Math.max(1, dragLimit.value);
@@ -144,7 +163,10 @@ export function SlidingSheet({
         <Animated.View
           onLayout={(event) => {
             if (fitContent) {
-              dragLimit.value = event.nativeEvent.layout.height;
+              const nextLimit = Math.max(1, event.nativeEvent.layout.height);
+              if (Math.abs(nextLimit - dragLimit.value) > 1) {
+                dragLimit.value = nextLimit;
+              }
             }
           }}
           style={[
