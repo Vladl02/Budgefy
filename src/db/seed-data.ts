@@ -10,6 +10,13 @@ type SeedOptions = {
   seedValue?: number;
 };
 
+type LegacyReportReceiptSeed = {
+  marketName: string;
+  amountCents: number;
+  paymentDate: string;
+  categoryName: string;
+};
+
 const CURRENT_MONTH_START = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 const NOW = new Date();
 
@@ -89,8 +96,31 @@ const CATEGORY_SHOP_PRESETS: Record<string, string[]> = {
   "Other": ["Misc Shop", "Marketplace", "Unknown", "Cash", "Other"],
 };
 
+const LEGACY_REPORT_RECEIPTS: readonly LegacyReportReceiptSeed[] = [
+  { marketName: "Media Galaxy", amountCents: 42990, paymentDate: "2025-12-27", categoryName: "Shopping" },
+  { marketName: "Kaufland", amountCents: 8550, paymentDate: "2025-12-21", categoryName: "Groceries" },
+  { marketName: "Lidl", amountCents: 14240, paymentDate: "2025-11-29", categoryName: "Groceries" },
+  { marketName: "Altex", amountCents: 56000, paymentDate: "2025-11-11", categoryName: "Shopping" },
+  { marketName: "Darwin", amountCents: 145069, paymentDate: "2025-11-08", categoryName: "Shopping" },
+  { marketName: "Metro", amountCents: 24530, paymentDate: "2025-11-02", categoryName: "Other" },
+  { marketName: "Metro", amountCents: 24530, paymentDate: "2026-01-02", categoryName: "Other" },
+  { marketName: "Media Galaxy", amountCents: 64530, paymentDate: "2026-01-02", categoryName: "Shopping" },
+  { marketName: "Altex", amountCents: 24530, paymentDate: "2026-02-01", categoryName: "Other" },
+  { marketName: "Kaufland", amountCents: 3050, paymentDate: "2026-02-04", categoryName: "Other" },
+  { marketName: "F64", amountCents: 35050, paymentDate: "2026-02-10", categoryName: "Shopping" },
+  { marketName: "Carturesti", amountCents: 24030, paymentDate: "2026-02-22", categoryName: "Other" },
+];
+
 const normalizePresetName = (value: string): string =>
   value.trim().replace(/\s+/g, " ").toLowerCase();
+
+const parseLocalNoonDate = (value: string): Date => {
+  const [yearRaw, monthRaw, dayRaw] = value.split("-");
+  const year = Number.parseInt(yearRaw, 10);
+  const month = Number.parseInt(monthRaw, 10);
+  const day = Number.parseInt(dayRaw, 10);
+  return new Date(year, month - 1, day, 12, 0, 0, 0);
+};
 
 export async function seedAppData(db: SeedDb, options: SeedOptions = {}): Promise<void> {
   const usersCount = options.usersCount ?? 1;
@@ -155,10 +185,6 @@ export async function seedAppData(db: SeedDb, options: SeedOptions = {}): Promis
       columns: {
         sum: funcs.int({ minValue: 500, maxValue: 22000 }),
         marketName: funcs.valuesFromArray({ values: MARKET_NAMES }),
-        createdAt: funcs.date({
-          minDate: CURRENT_MONTH_START,
-          maxDate: NOW,
-        }),
         timedAt: funcs.date({
           minDate: CURRENT_MONTH_START,
           maxDate: NOW,
@@ -205,6 +231,7 @@ export async function seedAppData(db: SeedDb, options: SeedOptions = {}): Promis
   const categoriesData = await seededDb
     .select({
       id: schema.categories.id,
+      userId: schema.categories.userId,
       categoryName: schema.categories.categoryName,
     })
     .from(schema.categories)
@@ -225,6 +252,50 @@ export async function seedAppData(db: SeedDb, options: SeedOptions = {}): Promis
         icon: catalogItem.iconName,
       })
       .where(eq(schema.categories.id, row.id));
+  }
+
+  const categoryIdByUserAndName = new Map<string, number>();
+  const fallbackCategoryIdByUser = new Map<number, number>();
+
+  for (const row of categoriesData) {
+    const normalizedName = normalizePresetName(row.categoryName);
+    categoryIdByUserAndName.set(`${row.userId}|${normalizedName}`, row.id);
+    if (!fallbackCategoryIdByUser.has(row.userId)) {
+      fallbackCategoryIdByUser.set(row.userId, row.id);
+    }
+  }
+
+  const legacyPaymentValues: {
+    sum: number;
+    marketName: string;
+    sourceType: string;
+    userId: number;
+    categoryId: number;
+    timedAt: Date;
+  }[] = [];
+
+  for (const userRow of usersData) {
+    const fallbackCategoryId = fallbackCategoryIdByUser.get(userRow.id);
+    if (!fallbackCategoryId) continue;
+
+    for (const receipt of LEGACY_REPORT_RECEIPTS) {
+      const normalizedCategoryName = normalizePresetName(receipt.categoryName);
+      const categoryId =
+        categoryIdByUserAndName.get(`${userRow.id}|${normalizedCategoryName}`) ?? fallbackCategoryId;
+
+      legacyPaymentValues.push({
+        sum: receipt.amountCents,
+        marketName: receipt.marketName,
+        sourceType: "manual",
+        userId: userRow.id,
+        categoryId,
+        timedAt: parseLocalNoonDate(receipt.paymentDate),
+      });
+    }
+  }
+
+  if (legacyPaymentValues.length > 0) {
+    await seededDb.insert(schema.payments).values(legacyPaymentValues);
   }
 
   const now = new Date();

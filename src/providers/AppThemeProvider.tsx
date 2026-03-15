@@ -45,11 +45,11 @@ const LIGHT_COLORS: AppThemeColors = {
   textSecondary: "#6B7280",
   border: "#E5E7EB",
   overlay: "rgba(3,7,18,0.45)",
-  tabBar: "#000000",
-  tabBarBorder: "#000000",
-  tabActivePill: "#FFFFFF",
-  tabActiveText: "#111827",
-  tabInactiveText: "#D1D5DB",
+  tabBar: "#FFFFFF",
+  tabBarBorder: "#E5E7EB",
+  tabActivePill: "#111827",
+  tabActiveText: "#F9FAFB",
+  tabInactiveText: "#6B7280",
 };
 
 const DARK_COLORS: AppThemeColors = {
