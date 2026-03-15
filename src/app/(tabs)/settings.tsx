@@ -196,7 +196,7 @@ export default function Settings() {
 
   const paymentsQuery = db
     .select({
-      createdAt: payments.createdAt,
+      paymentDate: payments.timedAt,
       sum: payments.sum,
     })
     .from(payments)
@@ -223,18 +223,18 @@ export default function Settings() {
   };
   const paymentRecords = paymentsData
     .map((item) => {
-      const createdAt = toDate(item.createdAt as Date | number | string | null | undefined);
-      if (!createdAt) return null;
+      const paymentDate = toDate(item.paymentDate as Date | number | string | null | undefined);
+      if (!paymentDate) return null;
       return {
-        createdAt,
+        paymentDate,
         sumCents: Number(item.sum ?? 0),
       };
     })
-    .filter((item): item is { createdAt: Date; sumCents: number } => item !== null);
+    .filter((item): item is { paymentDate: Date; sumCents: number } => item !== null);
   const dayKeys = Array.from(
     new Set(
       paymentRecords
-        .map((item) => toDayKey(item.createdAt))
+        .map((item) => toDayKey(item.paymentDate))
         .filter((key): key is string => key !== null),
     ),
   ).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
@@ -305,9 +305,9 @@ export default function Settings() {
   const thisMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   const thisMonthTitle = thisMonthStart.toLocaleDateString("en-US", { month: "long", year: "numeric" });
   const previousMonthStart = new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1);
-  const thisMonthScanned = paymentRecords.filter((item) => item.createdAt >= thisMonthStart).length;
+  const thisMonthScanned = paymentRecords.filter((item) => item.paymentDate >= thisMonthStart).length;
   const previousMonthScanned = paymentRecords.filter(
-    (item) => item.createdAt >= previousMonthStart && item.createdAt < thisMonthStart,
+    (item) => item.paymentDate >= previousMonthStart && item.paymentDate < thisMonthStart,
   ).length;
   const monthOverMonth =
     previousMonthScanned === 0
@@ -328,10 +328,10 @@ export default function Settings() {
   const consistencyRate = Math.round((thisMonthDayKeyCount / Math.max(daysElapsedThisMonth, 1)) * 100);
   const averageScansPerActiveDay = receiptsScanned > 0 ? (receiptsScanned / Math.max(dayKeys.length, 1)).toFixed(1) : "0.0";
   const thisMonthSpendCents = paymentRecords
-    .filter((item) => item.createdAt >= thisMonthStart)
+    .filter((item) => item.paymentDate >= thisMonthStart)
     .reduce((total, item) => total + item.sumCents, 0);
   const previousMonthSpendCents = paymentRecords
-    .filter((item) => item.createdAt >= previousMonthStart && item.createdAt < thisMonthStart)
+    .filter((item) => item.paymentDate >= previousMonthStart && item.paymentDate < thisMonthStart)
     .reduce((total, item) => total + item.sumCents, 0);
   const spendChangePercent =
     previousMonthSpendCents === 0
@@ -344,8 +344,8 @@ export default function Settings() {
   const projectedMonthSpendCents = Math.round((thisMonthSpendCents / Math.max(daysElapsedThisMonth, 1)) * daysInThisMonth);
   const noScanDaysThisMonth = Math.max(daysElapsedThisMonth - thisMonthDayKeyCount, 0);
   const thisMonthDayTotals = paymentRecords.reduce<Map<string, number>>((map, item) => {
-    if (item.createdAt < thisMonthStart) return map;
-    const key = toDayKey(item.createdAt);
+    if (item.paymentDate < thisMonthStart) return map;
+    const key = toDayKey(item.paymentDate);
     if (!key) return map;
     map.set(key, (map.get(key) ?? 0) + item.sumCents);
     return map;
@@ -369,8 +369,8 @@ export default function Settings() {
   const weekdayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const weekdayCounts = [0, 0, 0, 0, 0, 0, 0];
   paymentRecords.forEach((item) => {
-    if (item.createdAt >= thisMonthStart) {
-      weekdayCounts[item.createdAt.getDay()] += 1;
+    if (item.paymentDate >= thisMonthStart) {
+      weekdayCounts[item.paymentDate.getDay()] += 1;
     }
   });
   let mostActiveWeekday = "N/A";
@@ -386,8 +386,8 @@ export default function Settings() {
     const monthStart = new Date(thisMonthStart.getFullYear(), thisMonthStart.getMonth() - offset, 1);
     const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
     const monthDayTotals = paymentRecords.reduce<Map<string, number>>((map, item) => {
-      if (item.createdAt < monthStart || item.createdAt >= monthEnd) return map;
-      const key = toDayKey(item.createdAt);
+      if (item.paymentDate < monthStart || item.paymentDate >= monthEnd) return map;
+      const key = toDayKey(item.paymentDate);
       if (!key) return map;
       map.set(key, (map.get(key) ?? 0) + item.sumCents);
       return map;

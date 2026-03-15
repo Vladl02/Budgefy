@@ -675,9 +675,9 @@ export default function AddExpense() {
           }
 
           const paymentResult = await dbExpo.runAsync(
-            `INSERT INTO payments (sum, market_name, source_type, user_id, category_id)
-             VALUES (?, ?, ?, ?, ?)`,
-            [amountInCents, marketName, "manual", selectedCategoryUserId, resolvedCategoryId],
+            `INSERT INTO payments (sum, market_name, source_type, user_id, category_id, timed_at)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [amountInCents, marketName, "manual", selectedCategoryUserId, resolvedCategoryId, Math.floor(Date.now() / 1000)],
           );
 
           const paymentId = Number(paymentResult.lastInsertRowId);

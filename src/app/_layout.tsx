@@ -19,7 +19,7 @@ import { AppThemeProvider, useAppTheme } from "../providers/AppThemeProvider";
 import { AuthProvider, useAuth } from "../providers/AuthProvider";
 import { RecommendationStoreProvider } from "../providers/RecommendationStoreProvider";
 
-const DATABASE_NAME = "users_6.db";
+const DATABASE_NAME = "users_7.db";
 
 export default function RootLayout() {
   return (

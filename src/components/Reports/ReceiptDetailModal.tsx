@@ -1,7 +1,5 @@
 import React from "react";
-import { Nunito_900Black } from "@expo-google-fonts/nunito";
-import { useFonts } from "expo-font";
-import { Animated, Image, Modal, PanResponder, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Animated, Image, InteractionManager, Modal, PanResponder, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import DateTimePicker, { DateTimePickerAndroid } from "@react-native-community/datetimepicker";
 import { Calendar, Check, ChevronDown, ChevronRight, Coins, MapPin, Trash2, X } from "lucide-react-native";
 import { useSQLiteContext } from "expo-sqlite";
@@ -135,9 +133,6 @@ const parseAmountFromLabel = (rawAmountLabel: string): number => {
 };
 
 function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap, onClose }: ReceiptDetailModalProps) {
-  const [fontsLoaded] = useFonts({
-    Nunito_900Black,
-  });
   const db = useSQLiteContext();
   const insets = useSafeAreaInsets();
   const hasImage = Boolean(item?.receiptPhotoUri);
@@ -157,6 +152,7 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
   const [editItemTotalPrice, setEditItemTotalPrice] = React.useState("0.00");
   const [editItemCategory, setEditItemCategory] = React.useState("");
   const [showEditItemCategoryOptions, setShowEditItemCategoryOptions] = React.useState(false);
+  const [isReadyForHeavyLoad, setIsReadyForHeavyLoad] = React.useState(false);
   const editItemSheetTranslateY = React.useRef(new Animated.Value(900)).current;
   const editItemCategoryOptions = React.useMemo(() => {
     const seen = new Set<string>();
@@ -181,7 +177,7 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
     return normalized;
   }, [categoryOptions, editItemCategory]);
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     if (!visible) return;
     const formattedDate = formatDatePillValue(item?.fullDate);
     const formattedTime = formatTimePillValue(item?.fullDate);
@@ -203,9 +199,26 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
       setEditItemTotalPrice("0.00");
       setEditItemCategory("");
       setShowEditItemCategoryOptions(false);
+      setReceiptItems([]);
+      setIsReadyForHeavyLoad(false);
       editItemSheetTranslateY.setValue(900);
     }
   }, [editItemSheetTranslateY, visible]);
+
+  React.useEffect(() => {
+    if (!visible) {
+      setIsReadyForHeavyLoad(false);
+      return;
+    }
+
+    const task = InteractionManager.runAfterInteractions(() => {
+      setIsReadyForHeavyLoad(true);
+    });
+
+    return () => {
+      task.cancel();
+    };
+  }, [visible]);
 
   React.useEffect(() => {
     let isCancelled = false;
@@ -241,14 +254,17 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
         return;
       }
 
+      setFallbackItem();
+      if (!isReadyForHeavyLoad) {
+        return;
+      }
+
       if (!item.id.startsWith("db-")) {
-        setFallbackItem();
         return;
       }
 
       const paymentId = Number(item.id.replace("db-", ""));
       if (!Number.isFinite(paymentId) || paymentId <= 0) {
-        setFallbackItem();
         return;
       }
 
@@ -301,7 +317,7 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
     return () => {
       isCancelled = true;
     };
-  }, [categoryAccentMap, currencyValue, db, item, visible]);
+  }, [categoryAccentMap, currencyValue, db, isReadyForHeavyLoad, item, visible]);
 
   const receiptDateTime = `${editableDate.toLowerCase()} at ${editableTime}`;
   const openNativeDatePicker = React.useCallback(() => {
@@ -511,7 +527,7 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
   );
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" hardwareAccelerated onRequestClose={onClose}>
       <View style={styles.container}>
           <View style={[styles.header, { paddingTop: insets.top + 8 }]}> 
             <View style={styles.headerSpacer} />
@@ -528,7 +544,7 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
           >
             <View style={styles.imageContainer}>
               {hasImage ? (
-                <Image source={{ uri: item?.receiptPhotoUri ?? undefined }} resizeMode="contain" style={styles.receiptImage} />
+                <Image source={{ uri: item?.receiptPhotoUri ?? undefined }} resizeMode="contain" fadeDuration={0} style={styles.receiptImage} />
               ) : (
                 <Text style={styles.noImageText}>(no image yet)</Text>
               )}
@@ -539,7 +555,7 @@ function ReceiptDetailModal({ visible, item, categoryOptions, categoryAccentMap,
                 <Check size={20} color="#FFFFFF" strokeWidth={2.8} />
               </View>
               <Text style={styles.storeName}>{item?.title ?? "Unknown store"}</Text>
-              <Text style={[styles.totalSum, fontsLoaded ? styles.totalSumRoundedBold : null]}>
+              <Text style={styles.totalSum}>
                 {item?.amount ?? "RON 0.00"}
               </Text>
               <Text style={styles.dateText}>{receiptDateTime}</Text>

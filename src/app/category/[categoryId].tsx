@@ -12,7 +12,7 @@ type ItemRow = {
   id: number;
   name: string;
   priceCents: number;
-  createdAt: Date | number | string | null;
+  paymentDate: Date | number | string | null;
   marketName: string | null;
 };
 
@@ -77,13 +77,13 @@ export default function CategoryItemsScreen() {
           id: products.id,
           name: products.name,
           priceCents: products.price,
-          createdAt: payments.createdAt,
+          paymentDate: payments.timedAt,
           marketName: payments.marketName,
         })
         .from(products)
         .innerJoin(payments, eq(products.paymentId, payments.id))
         .where(eq(payments.id, -1))
-        .orderBy(desc(payments.createdAt), desc(products.id));
+        .orderBy(desc(payments.timedAt), desc(products.id));
     }
 
     return db
@@ -91,13 +91,13 @@ export default function CategoryItemsScreen() {
         id: products.id,
         name: products.name,
         priceCents: products.price,
-        createdAt: payments.createdAt,
+        paymentDate: payments.timedAt,
         marketName: payments.marketName,
       })
       .from(products)
       .innerJoin(payments, eq(products.paymentId, payments.id))
       .where(and(eq(payments.categoryId, categoryId), eq(payments.userId, activeUserId)))
-      .orderBy(desc(payments.createdAt), desc(products.id));
+      .orderBy(desc(payments.timedAt), desc(products.id));
   }, [activeUserId, categoryId, db, hasValidCategoryId]);
   const { data: itemsData } = useLiveQuery(itemsQuery);
   const totalSpentCents = useMemo(
@@ -144,7 +144,7 @@ export default function CategoryItemsScreen() {
           </View>
         }
         renderItem={({ item }) => {
-          const date = toDate(item.createdAt);
+          const date = toDate(item.paymentDate);
           const dateLabel = date
             ? date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
             : "Unknown date";
