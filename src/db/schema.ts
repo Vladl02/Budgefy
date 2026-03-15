@@ -34,9 +34,11 @@ export const payments = sqliteTable("payments", {
     categoryId: integer("category_id")
         .notNull()
         .references(() => categories.id),
+    // DB insertion timestamp (ms). Should not be used as receipt/payment date.
     createdAt: integer("created_at", { mode: 'timestamp_ms' })
         .notNull()
         .default(sql`(unixepoch() * 1000)`),
+    // Receipt/payment date (seconds).
     timedAt: integer("timed_at", { mode: 'timestamp' })
         .notNull()
         .default(sql`(unixepoch())`),

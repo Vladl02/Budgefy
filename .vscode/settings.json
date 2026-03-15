@@ -2,6 +2,12 @@
   "editor.codeActionsOnSave": {
     "source.fixAll": "explicit",
     "source.organizeImports": "explicit",
-    "source.sortMembers": "explicit",
-  }
+    "source.sortMembers": "explicit"
+  },
+  "json.schemas": [
+    {
+      "fileMatch": ["/app.json", "app.json"],
+      "url": "https://exp.host/--/api/v2/project/configuration/schema/54.0.0"
+    }
+  ]
 }

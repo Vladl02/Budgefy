@@ -1,8 +1,8 @@
-import { Platform } from "react-native";
+import { supabase } from "@/src/utils/supabase";
 import { FunctionsHttpError } from "@supabase/supabase-js";
 import * as FileSystem from "expo-file-system/legacy";
 import type { SQLiteDatabase } from "expo-sqlite";
-import { supabase } from "@/src/utils/supabase";
+import { Platform } from "react-native";
 
 const RECEIPT_ANALYZE_FUNCTION = "clever-responder";
 
@@ -23,6 +23,7 @@ type ParsedReceiptItem = {
 type ParsedReceiptAnalysis = {
   marketName: string | null;
   totalCents: number | null;
+  paymentDate: Date | null;
   items: ParsedReceiptItem[];
 };
 
@@ -350,6 +351,66 @@ const getCentsByKeys = (record: UnknownRecord, keys: string[]): number | null =>
   return null;
 };
 
+const parseDateValue = (value: unknown): Date | null => {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const ms = value >= 1_000_000_000_000 ? value : value * 1000;
+    const parsed = new Date(ms);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      const [yearRaw, monthRaw, dayRaw] = trimmed.split("-");
+      const year = Number.parseInt(yearRaw, 10);
+      const month = Number.parseInt(monthRaw, 10);
+      const day = Number.parseInt(dayRaw, 10);
+      const parsed = new Date(year, month - 1, day, 12, 0, 0, 0);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    if (/^\d{10,13}$/.test(trimmed)) {
+      const numeric = Number.parseInt(trimmed, 10);
+      if (!Number.isFinite(numeric)) return null;
+      const ms = trimmed.length === 13 ? numeric : numeric * 1000;
+      const parsed = new Date(ms);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    const parsed = new Date(trimmed);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const nestedRecord = toRecord(value);
+  if (!nestedRecord) return null;
+
+  return (
+    parseDateValue(nestedRecord.value) ??
+    parseDateValue(nestedRecord.date) ??
+    parseDateValue(nestedRecord.datetime) ??
+    parseDateValue(nestedRecord.dateTime) ??
+    parseDateValue(nestedRecord.timestamp) ??
+    parseDateValue(nestedRecord.purchaseDate) ??
+    parseDateValue(nestedRecord.transactionDate) ??
+    parseDateValue(nestedRecord.receiptDate) ??
+    parseDateValue(nestedRecord.issuedAt)
+  );
+};
+
+const getDateByKeys = (record: UnknownRecord, keys: string[]): Date | null => {
+  for (const key of keys) {
+    const parsed = parseDateValue(record[key]);
+    if (parsed) return parsed;
+  }
+  return null;
+};
+
 const getStringArrayByKeys = (record: UnknownRecord, keys: string[]): string[] => {
   for (const key of keys) {
     const value = record[key];
@@ -533,7 +594,7 @@ const parseReceiptAnalysis = (raw: unknown): ParsedReceiptAnalysis => {
 
   const roots = getCandidateRoots(rawValue);
   if (roots.length === 0) {
-    return { marketName: null, totalCents: null, items: [] };
+    return { marketName: null, totalCents: null, paymentDate: null, items: [] };
   }
 
   const preferredRoot = roots.find((candidate) => getItemsFromRoot(candidate).length > 0) ?? roots[0];
@@ -629,6 +690,44 @@ const parseReceiptAnalysis = (raw: unknown): ParsedReceiptAnalysis => {
       getAmountByKeys(candidate, ["total", "totalAmount", "sum", "grandTotal", "amount"]),
     ).find((value): value is number => value !== null) ??
     null;
+  const paymentDate =
+    getDateByKeys(preferredRoot, [
+      "paymentDate",
+      "payment_date",
+      "purchaseDate",
+      "purchase_date",
+      "receiptDate",
+      "receipt_date",
+      "transactionDate",
+      "transaction_date",
+      "issuedAt",
+      "issued_at",
+      "dateTime",
+      "datetime",
+      "date",
+      "timestamp",
+    ]) ??
+    roots
+      .map((candidate) =>
+        getDateByKeys(candidate, [
+          "paymentDate",
+          "payment_date",
+          "purchaseDate",
+          "purchase_date",
+          "receiptDate",
+          "receipt_date",
+          "transactionDate",
+          "transaction_date",
+          "issuedAt",
+          "issued_at",
+          "dateTime",
+          "datetime",
+          "date",
+          "timestamp",
+        ]),
+      )
+      .find((value): value is Date => value !== null) ??
+    null;
 
   const items = getItemsFromRoot(preferredRoot)
     .map((item) => parseReceiptItem(item))
@@ -637,6 +736,7 @@ const parseReceiptAnalysis = (raw: unknown): ParsedReceiptAnalysis => {
   return {
     marketName,
     totalCents: totalCents !== null ? Math.max(totalCents, 0) : null,
+    paymentDate,
     items,
   };
 };
@@ -812,11 +912,19 @@ const persistAnalyzedReceipt = async (
     items[0],
   );
   const paymentCategory = resolveCategoryForItem(dominantItem);
+  const fallbackPaymentDateSeconds = Math.floor(Date.now() / 1000);
+  const parsedPaymentDateSeconds = parsed.paymentDate
+    ? Math.floor(parsed.paymentDate.getTime() / 1000)
+    : fallbackPaymentDateSeconds;
+  const paymentDateSeconds =
+    Number.isFinite(parsedPaymentDateSeconds) && parsedPaymentDateSeconds > 0
+      ? parsedPaymentDateSeconds
+      : fallbackPaymentDateSeconds;
 
   const paymentInsertResult = await db.runAsync(
-    `INSERT INTO payments (sum, market_name, source_type, user_id, category_id, receipt_photo_link)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [paymentTotalCents, parsed.marketName, "receipt", context.userId, paymentCategory.id, receiptPhotoLink],
+    `INSERT INTO payments (sum, market_name, source_type, user_id, category_id, receipt_photo_link, timed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [paymentTotalCents, parsed.marketName, "receipt", context.userId, paymentCategory.id, receiptPhotoLink, paymentDateSeconds],
   );
 
   const paymentId = Number(paymentInsertResult.lastInsertRowId);
@@ -869,9 +977,9 @@ const persistScannedReceiptAsSpending = async (
   const receiptPhotoLink = resolveReceiptPhotoLink(receiptUri);
 
   const paymentInsertResult = await db.runAsync(
-    `INSERT INTO payments (sum, market_name, source_type, user_id, category_id, receipt_photo_link)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [0, "Scanned Receipt", "receipt", context.userId, context.categoryId, receiptPhotoLink],
+    `INSERT INTO payments (sum, market_name, source_type, user_id, category_id, receipt_photo_link, timed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [0, "Scanned Receipt", "receipt", context.userId, context.categoryId, receiptPhotoLink, Math.floor(Date.now() / 1000)],
   );
 
   const paymentId = Number(paymentInsertResult.lastInsertRowId);

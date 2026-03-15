@@ -1,14 +1,14 @@
-import React from "react";
+import { TagSearchModal } from "@/src/components/TagSearchModal";
 import { Nunito_900Black } from "@expo-google-fonts/nunito";
+import DateTimePicker, { DateTimePickerAndroid } from "@react-native-community/datetimepicker";
 import { useFonts } from "expo-font";
 import { Image as ExpoImage } from "expo-image";
-import { Animated, Modal, PanResponder, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, UIManager, View } from "react-native";
-import DateTimePicker, { DateTimePickerAndroid } from "@react-native-community/datetimepicker";
-import { Calendar, Check, ChevronDown, ChevronRight, Coins, MapPin, Trash2, X } from "lucide-react-native";
 import { useSQLiteContext } from "expo-sqlite";
+import { Calendar, Check, ChevronDown, ChevronRight, Coins, MapPin, Trash2, X } from "lucide-react-native";
+import React from "react";
+import { Animated, Modal, PanResponder, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, UIManager, View } from "react-native";
 import RNPickerSelect from "react-native-picker-select";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { TagSearchModal } from "@/src/components/TagSearchModal";
 
 import type { ReceiptItem } from "./types";
 

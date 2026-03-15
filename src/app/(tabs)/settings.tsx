@@ -20,12 +20,11 @@ import {
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Animated, Image, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SlidingSheet } from '@/src/components/SlidingSheet';
 import { payments, users } from "@/src/db/schema";
 import { useGuardedModalPush } from '@/src/hooks/guardForModals';
-import { useAuth } from "@/src/providers/AuthProvider";
 import { useAppTheme } from "@/src/providers/AppThemeProvider";
+import { useAuth } from "@/src/providers/AuthProvider";
 import {
   DEFAULT_BASE_CURRENCY,
   DEFAULT_LANGUAGE,
@@ -35,6 +34,7 @@ import {
   type HomeLayoutStyle,
   setHomeLayoutStylePreference,
 } from "@/src/utils/preferences";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
 import { eq } from "drizzle-orm";
 import { drizzle, useLiveQuery } from "drizzle-orm/expo-sqlite";
@@ -210,7 +210,7 @@ export default function Settings() {
 
   const paymentsQuery = db
     .select({
-      createdAt: payments.createdAt,
+      paymentDate: payments.timedAt,
       sum: payments.sum,
     })
     .from(payments)
@@ -233,18 +233,18 @@ export default function Settings() {
   };
   const paymentRecords = paymentsData
     .map((item) => {
-      const createdAt = toDate(item.createdAt as Date | number | string | null | undefined);
-      if (!createdAt) return null;
+      const paymentDate = toDate(item.paymentDate as Date | number | string | null | undefined);
+      if (!paymentDate) return null;
       return {
-        createdAt,
+        paymentDate,
         sumCents: Number(item.sum ?? 0),
       };
     })
-    .filter((item): item is { createdAt: Date; sumCents: number } => item !== null);
+    .filter((item): item is { paymentDate: Date; sumCents: number } => item !== null);
   const dayKeys = Array.from(
     new Set(
       paymentRecords
-        .map((item) => toDayKey(item.createdAt))
+        .map((item) => toDayKey(item.paymentDate))
         .filter((key): key is string => key !== null),
     ),
   ).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
