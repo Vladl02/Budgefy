@@ -28,6 +28,7 @@ type ExpenseGridProps = {
   onDeleteItem?: (item: ExpenseItem) => void;
   layoutStyle?: HomeLayoutStyle;
   isEditing?: boolean;
+  disableInternalScroll?: boolean;
   shakeAnim?: Animated.AnimatedInterpolation<string>;
   onReorderPreview?: (nextCategoryIds: string[]) => void;
   onReorderCommit?: (nextCategoryIds: string[]) => void;
@@ -123,6 +124,7 @@ export function ExpenseGrid({
   onDeleteItem,
   layoutStyle = "grid",
   isEditing = false,
+  disableInternalScroll = false,
   shakeAnim,
   onReorderCommit,
   onReorderStart,
@@ -337,9 +339,11 @@ export function ExpenseGrid({
           width: isMasonryLayout ? MASONRY_CONTENT_WIDTH : GRID_CONTENT_WIDTH,
         },
       ]}
+      disableVirtualization={disableInternalScroll}
+      initialNumToRender={disableInternalScroll ? items.length : undefined}
       showsVerticalScrollIndicator={false}
       pointerEvents={isEditing ? "box-none" : "auto"}
-      scrollEnabled={!isEditing || isMasonryLayout}
+      scrollEnabled={disableInternalScroll ? false : !isEditing || isMasonryLayout}
     />
   );
 }

@@ -12,14 +12,43 @@ import {
   Inter_600SemiBold,
   Inter_700Bold,
 } from "@expo-google-fonts/inter";
+import { useFocusEffect } from "expo-router";
 import { useFonts } from "expo-font";
-import { X } from "lucide-react-native";
+import { LinearGradient } from "expo-linear-gradient";
+import { CalendarClock, X } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Dropdown } from "react-native-element-dropdown";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Svg, { Path } from "react-native-svg";
+import {
+  siApple,
+  siDiscord,
+  siDropbox,
+  siGithub,
+  siGoogleplay,
+  siHbo,
+  siHbomax,
+  siIcloud,
+  siNetflix,
+  siNotion,
+  siPatreon,
+  siPaypal,
+  siSpotify,
+  siUber,
+  siX,
+  siYoutube,
+  type SimpleIcon,
+} from "simple-icons";
 
 import { DEFAULT_CATEGORY_ICON_NAME, resolveIconByName } from "@/src/utils/categoryIcons";
 import { getAppPreference, setAppPreference } from "@/src/utils/preferences";
+import {
+  getNextRecurringPayment,
+  loadRecurringPayments,
+  saveRecurringPayments,
+  type RecurringPayment,
+} from "@/src/utils/recurringPayments";
 import {
   categoriesForMonth,
   paymentSumsByCategoryForMonth,
@@ -29,6 +58,9 @@ import { drizzle, useLiveQuery } from "drizzle-orm/expo-sqlite";
 import { useSQLiteContext } from "expo-sqlite";
 const HOME_CATEGORY_ORDER_KEY_PREFIX = "home_category_order";
 const HOME_LAYOUT_STYLE_KEY = "home_layout_style_v1";
+const PAUSED_RECURRING_SUBSCRIPTIONS_KEY = "paused_recurring_subscriptions_v1";
+const NEXT_SUBSCRIPTION_MENU_WIDTH = 148;
+const NEXT_SUBSCRIPTION_MENU_TRIGGER_WIDTH = 22;
 
 const normalizeToken = (value: string | null | undefined): string =>
   (value ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -55,6 +87,160 @@ const withAlpha = (hex: string, alpha: number): string => {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 };
 
+const formatRecurringAmount = (amount: number, currencyCode: string): string => {
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: currencyCode,
+      currencyDisplay: "narrowSymbol",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `${amount.toFixed(2)} ${currencyCode}`;
+  }
+};
+
+const startOfDay = (date: Date): Date =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+const clampDayForMonth = (year: number, month: number, dayOfMonth: number): number => {
+  const monthEnd = new Date(year, month + 1, 0).getDate();
+  return Math.max(1, Math.min(monthEnd, dayOfMonth));
+};
+
+const resolveBillingCycleProgress = (rawDay: string, nextDueDate: Date, now: Date = new Date()): number => {
+  const parsedDay = Number.parseInt(rawDay, 10);
+  if (!Number.isFinite(parsedDay)) return 0;
+
+  const nextDue = startOfDay(nextDueDate);
+  const previousMonth = new Date(nextDue.getFullYear(), nextDue.getMonth() - 1, 1);
+  const previousDueDay = clampDayForMonth(previousMonth.getFullYear(), previousMonth.getMonth(), parsedDay);
+  const previousDue = new Date(previousMonth.getFullYear(), previousMonth.getMonth(), previousDueDay);
+  const today = startOfDay(now);
+
+  const cycleDuration = nextDue.getTime() - previousDue.getTime();
+  if (cycleDuration <= 0) return 0;
+
+  const elapsed = today.getTime() - previousDue.getTime();
+  const rawProgress = elapsed / cycleDuration;
+  return Math.max(0, Math.min(1, rawProgress));
+};
+
+type ServiceLogo =
+  | { kind: "simple"; icon: SimpleIcon }
+  | { kind: "capcut" }
+  | { kind: "fallback" };
+
+type PlatformProvider = {
+  icon: SimpleIcon;
+  name: string;
+};
+
+type ResolvedSubscriptionBrand = {
+  serviceName: string;
+  platform: PlatformProvider | null;
+  logo: ServiceLogo;
+  glowHex: string;
+};
+
+const normalizeBrandText = (value: string): string =>
+  value.trim().toLowerCase().replace(/\s+/g, " ");
+
+const stripPlatformPrefix = (value: string): string =>
+  value
+    .trim()
+    .replace(/^(apple|app store|itunes)\s*[:\-|]?\s*/i, "")
+    .replace(/^(google play|play store)\s*[:\-|]?\s*/i, "")
+    .trim();
+
+const resolvePlatformProvider = (rawName: string): PlatformProvider | null => {
+  const normalized = normalizeBrandText(rawName);
+  if (/^(apple|app store|itunes)\b/.test(normalized) || /\bapple\.com\/bill\b/.test(normalized)) {
+    return { icon: siApple, name: "Apple" };
+  }
+  if (/^(google play|play store)\b/.test(normalized)) {
+    return { icon: siGoogleplay, name: "Google Play" };
+  }
+  return null;
+};
+
+const BRAND_LOGO_MATCHERS: { keywords: string[]; logo: ServiceLogo; glowHex: string }[] = [
+  { keywords: ["capcut"], logo: { kind: "capcut" }, glowHex: "#111111" },
+  { keywords: ["netflix"], logo: { kind: "simple", icon: siNetflix }, glowHex: "#E50914" },
+  { keywords: ["spotify"], logo: { kind: "simple", icon: siSpotify }, glowHex: "#1DB954" },
+  { keywords: ["youtube", "youtube premium", "yt"], logo: { kind: "simple", icon: siYoutube }, glowHex: "#FF0000" },
+  { keywords: ["hbo max", "max"], logo: { kind: "simple", icon: siHbomax }, glowHex: "#8D53F0" },
+  { keywords: ["hbo"], logo: { kind: "simple", icon: siHbo }, glowHex: "#660099" },
+  { keywords: ["icloud"], logo: { kind: "simple", icon: siIcloud }, glowHex: "#1F8CFF" },
+  { keywords: ["uber", "uber one"], logo: { kind: "simple", icon: siUber }, glowHex: "#111111" },
+  { keywords: ["paypal"], logo: { kind: "simple", icon: siPaypal }, glowHex: "#003087" },
+  { keywords: ["patreon"], logo: { kind: "simple", icon: siPatreon }, glowHex: "#FF424D" },
+  { keywords: ["discord"], logo: { kind: "simple", icon: siDiscord }, glowHex: "#5865F2" },
+  { keywords: ["github"], logo: { kind: "simple", icon: siGithub }, glowHex: "#181717" },
+  { keywords: ["dropbox"], logo: { kind: "simple", icon: siDropbox }, glowHex: "#0061FF" },
+  { keywords: ["notion"], logo: { kind: "simple", icon: siNotion }, glowHex: "#111111" },
+  { keywords: ["twitter", "x premium", "x.com"], logo: { kind: "simple", icon: siX }, glowHex: "#111111" },
+];
+
+const resolveSubscriptionBrand = (rawName: string): ResolvedSubscriptionBrand => {
+  const platform = resolvePlatformProvider(rawName);
+  const strippedName = stripPlatformPrefix(rawName);
+  const serviceName = strippedName.length > 0 ? strippedName : rawName.trim();
+  const normalized = normalizeBrandText(serviceName);
+
+  for (const matcher of BRAND_LOGO_MATCHERS) {
+    if (matcher.keywords.some((keyword) => normalized.includes(keyword))) {
+      return {
+        serviceName,
+        platform,
+        logo: matcher.logo,
+        glowHex: matcher.glowHex,
+      };
+    }
+  }
+
+  return {
+    serviceName,
+    platform,
+    logo: { kind: "fallback" },
+    glowHex: "#64748B",
+  };
+};
+
+const resolveGlowColor = (hex: string, isDark: boolean): string => {
+  const normalized = hex.startsWith("#") ? hex : `#${hex}`;
+  const darkSafeHex = normalized.toLowerCase() === "#000000" ? (isDark ? "#FFFFFF" : "#111111") : normalized;
+  return withAlpha(darkSafeHex, isDark ? 0.2 : 0.14);
+};
+
+const resolveProgressColor = (hex: string, isDark: boolean): string => {
+  const normalized = hex.startsWith("#") ? hex : `#${hex}`;
+  if (normalized.toLowerCase() === "#000000") {
+    return isDark ? "#F9FAFB" : "#111111";
+  }
+  return normalized;
+};
+
+function SimpleBrandIcon({ icon, size }: { icon: SimpleIcon; size: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path d={icon.path} fill={`#${icon.hex}`} />
+    </Svg>
+  );
+}
+
+function CapCutLogo({ size, color }: { size: number; color: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M3.8 6.5h6.3l10.1 11h-6.3zM3.8 17.5h6.3l10.1-11h-6.3z"
+        fill={color}
+      />
+    </Svg>
+  );
+}
+
 function HomeContent() {
   const { isDark } = useAppTheme();
   const drawer = useAppDrawer();
@@ -72,6 +258,9 @@ function HomeContent() {
   const [isCategoryOrderHydrated, setIsCategoryOrderHydrated] = useState(false);
   const [homeLayoutStyle, setHomeLayoutStyle] = useState<HomeLayoutStyle>("grid");
   const [isCategoryEditing, setIsCategoryEditing] = useState(false);
+  const [recurringPayments, setRecurringPayments] = useState<RecurringPayment[]>([]);
+  const [pausedRecurringSubscriptionIds, setPausedRecurringSubscriptionIds] = useState<string[]>([]);
+  const [acknowledgedSubscriptionKeys, setAcknowledgedSubscriptionKeys] = useState<string[]>([]);
   const latestAvailableMonth = useMemo(
     () => new Date(new Date().getFullYear(), new Date().getMonth(), 1),
     [],
@@ -255,6 +444,39 @@ function HomeContent() {
     };
   }, [dbExpo]);
 
+  useFocusEffect(
+    useCallback(() => {
+      let isMounted = true;
+
+      const hydrateRecurringPayments = async () => {
+        const [storedPayments, pausedRaw] = await Promise.all([
+          loadRecurringPayments(),
+          getAppPreference(dbExpo, PAUSED_RECURRING_SUBSCRIPTIONS_KEY, "[]"),
+        ]);
+        if (!isMounted) return;
+        setRecurringPayments(storedPayments);
+
+        try {
+          const parsed = JSON.parse(pausedRaw);
+          if (Array.isArray(parsed)) {
+            setPausedRecurringSubscriptionIds(
+              parsed.map((value) => String(value)).filter((value) => value.length > 0),
+            );
+            return;
+          }
+        } catch {
+          // Fallback below.
+        }
+        setPausedRecurringSubscriptionIds([]);
+      };
+
+      void hydrateRecurringPayments();
+      return () => {
+        isMounted = false;
+      };
+    }, [dbExpo]),
+  );
+
   useEffect(() => {
     if (categoryOrderIds === null) {
       return;
@@ -295,9 +517,90 @@ function HomeContent() {
     [orderedExpenseItems],
   );
   const totalExpenseNoDecimals = Math.round(expenseItems.reduce((acc, item) => acc + Number(item.amount), 0));
+  const activeRecurringPayments = useMemo(
+    () =>
+      recurringPayments.filter(
+        (payment) => !pausedRecurringSubscriptionIds.includes(payment.id),
+      ),
+    [pausedRecurringSubscriptionIds, recurringPayments],
+  );
+  const nextSubscription = useMemo(
+    () => getNextRecurringPayment(activeRecurringPayments),
+    [activeRecurringPayments],
+  );
+  const nextSubscriptionBrand = useMemo(
+    () => (nextSubscription ? resolveSubscriptionBrand(nextSubscription.payment.name) : null),
+    [nextSubscription],
+  );
+  const nextSubscriptionServiceName = useMemo(() => {
+    if (!nextSubscription) return "";
+    return nextSubscriptionBrand?.serviceName ?? nextSubscription.payment.name;
+  }, [nextSubscription, nextSubscriptionBrand]);
+  const nextSubscriptionBillingLabel = useMemo(() => {
+    if (!nextSubscriptionBrand?.platform) return "";
+    return `Billed via ${nextSubscriptionBrand.platform.name}`;
+  }, [nextSubscriptionBrand]);
+  const nextSubscriptionDueLabel = useMemo(() => {
+    if (!nextSubscription) return "";
+    return nextSubscription.dueDate.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    });
+  }, [nextSubscription]);
+  const nextSubscriptionRelativeLabel = useMemo(() => {
+    if (!nextSubscription) return "";
+    if (nextSubscription.daysUntil === 0) return "today";
+    if (nextSubscription.daysUntil === 1) return "tomorrow";
+    return `${nextSubscription.daysUntil}d`;
+  }, [nextSubscription]);
+  const nextSubscriptionKey = useMemo(() => {
+    if (!nextSubscription) return null;
+    return `${nextSubscription.payment.id}:${startOfDay(nextSubscription.dueDate).getTime()}`;
+  }, [nextSubscription]);
+  const isNextSubscriptionAcknowledged = useMemo(
+    () => Boolean(nextSubscriptionKey && acknowledgedSubscriptionKeys.includes(nextSubscriptionKey)),
+    [acknowledgedSubscriptionKeys, nextSubscriptionKey],
+  );
+  const nextSubscriptionAmountLabel = useMemo(() => {
+    if (!nextSubscription) return "";
+    return formatRecurringAmount(nextSubscription.payment.amount, nextSubscription.payment.currency);
+  }, [nextSubscription]);
+  const nextSubscriptionCycleProgress = useMemo(() => {
+    if (!nextSubscription) return 0;
+    return resolveBillingCycleProgress(nextSubscription.payment.day, nextSubscription.dueDate);
+  }, [nextSubscription]);
+  const nextSubscriptionIsUrgent = useMemo(
+    () => Boolean(nextSubscription && nextSubscription.daysUntil < 3),
+    [nextSubscription],
+  );
+  const nextSubscriptionGlowColor = useMemo(() => {
+    if (!nextSubscriptionBrand) {
+      return withAlpha(isDark ? "#FFFFFF" : "#94A3B8", isDark ? 0.18 : 0.14);
+    }
+    return resolveGlowColor(nextSubscriptionBrand.glowHex, isDark);
+  }, [isDark, nextSubscriptionBrand]);
+  const nextSubscriptionProgressColor = useMemo(() => {
+    if (!nextSubscriptionBrand) {
+      return isDark ? "#D1D5DB" : "#64748B";
+    }
+    const brandHex =
+      nextSubscriptionBrand.logo.kind === "simple"
+        ? `#${nextSubscriptionBrand.logo.icon.hex}`
+        : nextSubscriptionBrand.glowHex;
+    return resolveProgressColor(brandHex, isDark);
+  }, [isDark, nextSubscriptionBrand]);
+
   const existingCategoryTokens = useMemo(
     () => new Set(categoriesData.map((item) => normalizeToken(item.categoryName))),
     [categoriesData],
+  );
+  const nextSubscriptionMenuOptions = useMemo(
+    () => [
+      { label: "Edit Subscription", value: "edit" },
+      { label: "Pause Tracking", value: "pause" },
+      { label: "Stop Tracking / Delete", value: "delete", isDanger: true },
+    ],
+    [],
   );
   const categoryPresetOptions = useMemo<CategoryPresetOption[]>(() => {
     const deduped = new Map<string, CategoryPresetOption>();
@@ -468,6 +771,91 @@ function HomeContent() {
     }
     setIsCategoryEditing(false);
   };
+  const persistPausedRecurringSubscriptionIds = useCallback(
+    async (nextIds: string[]) => {
+      try {
+        await setAppPreference(
+          dbExpo,
+          PAUSED_RECURRING_SUBSCRIPTIONS_KEY,
+          JSON.stringify(nextIds),
+        );
+      } catch (error) {
+        console.error("Failed to persist paused recurring subscriptions", error);
+      }
+    },
+    [dbExpo],
+  );
+  const handleEditSubscription = () => {
+    pushModal({
+      pathname: "/(modals)/(settings)/recurringexpense",
+    });
+  };
+  const handlePauseSubscriptionTracking = () => {
+    if (!nextSubscription) return;
+    const subscriptionId = nextSubscription.payment.id;
+    setPausedRecurringSubscriptionIds((prev) => {
+      if (prev.includes(subscriptionId)) return prev;
+      const next = [...prev, subscriptionId];
+      void persistPausedRecurringSubscriptionIds(next);
+      return next;
+    });
+  };
+  const handleStopTrackingSubscription = () => {
+    if (!nextSubscription) return;
+
+    Alert.alert(
+      "Stop tracking this subscription?",
+      `We'll remove "${nextSubscription.payment.name}" from tracked recurring subscriptions.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Stop Tracking",
+          style: "destructive",
+          onPress: async () => {
+            const subscriptionId = nextSubscription.payment.id;
+            const nextPayments = recurringPayments.filter((payment) => payment.id !== subscriptionId);
+
+            try {
+              setRecurringPayments(nextPayments);
+              await saveRecurringPayments(nextPayments);
+              setPausedRecurringSubscriptionIds((prev) => {
+                const next = prev.filter((id) => id !== subscriptionId);
+                void persistPausedRecurringSubscriptionIds(next);
+                return next;
+              });
+              setAcknowledgedSubscriptionKeys((prev) =>
+                prev.filter((key) => !key.startsWith(`${subscriptionId}:`)),
+              );
+            } catch (error) {
+              console.error("Failed stopping subscription tracking", error);
+              Alert.alert("Unable to stop tracking", "Please try again.");
+            }
+          },
+        },
+      ],
+    );
+  };
+  const handleAcknowledgeSubscription = () => {
+    if (!nextSubscriptionKey) return;
+    setAcknowledgedSubscriptionKeys((prev) => (
+      prev.includes(nextSubscriptionKey) ? prev : [...prev, nextSubscriptionKey]
+    ));
+  };
+  const handleSubscriptionMenuChange = (
+    option: { value: string },
+  ) => {
+    if (option.value === "edit") {
+      handleEditSubscription();
+      return;
+    }
+    if (option.value === "pause") {
+      handlePauseSubscriptionTracking();
+      return;
+    }
+    if (option.value === "delete") {
+      handleStopTrackingSubscription();
+    }
+  };
 
   
   return (
@@ -482,7 +870,16 @@ function HomeContent() {
         {isCategoryEditing ? (
           <Pressable style={StyleSheet.absoluteFill} onPress={handleDismissEditing} />
         ) : null}
-        <View style={styles.contentForeground} pointerEvents="box-none">
+        <ScrollView
+          style={styles.contentForeground}
+          contentContainerStyle={[
+            styles.contentScrollContent,
+            { paddingBottom: Math.max(96, insets.bottom + 150) },
+          ]}
+          showsVerticalScrollIndicator={false}
+          scrollEnabled={!isCategoryEditing}
+          pointerEvents="box-none"
+        >
           <Text style={styles.expenseTotal}>
             Expense ${totalExpenseNoDecimals}
           </Text>
@@ -494,6 +891,7 @@ function HomeContent() {
               onLongPressItem={handleLongPressCategory}
               onDeleteItem={handleDeleteCategory}
               isEditing={isCategoryEditing}
+              disableInternalScroll
               onReorderStart={handleCategoryOrderStart}
               onReorderCommit={handleCategoryOrderCommit}
               onBackgroundPress={handleDismissEditing}
@@ -503,7 +901,242 @@ function HomeContent() {
               <ActivityIndicator size="small" color={isDark ? "#F3F4F6" : "#111827"} />
             </View>
           )}
-        </View>
+          <View style={styles.nextSubscriptionSection}>
+            <View style={[styles.nextSubscriptionCard, isDark ? styles.nextSubscriptionCardDark : null]}>
+              <LinearGradient
+                pointerEvents="none"
+                colors={[
+                  isDark ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.44)",
+                  "rgba(255,255,255,0)",
+                ]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={styles.nextSubscriptionInnerTopShadow}
+              />
+              <LinearGradient
+                pointerEvents="none"
+                colors={["rgba(0,0,0,0)", isDark ? "rgba(0,0,0,0.58)" : "rgba(0,0,0,0.12)"]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={styles.nextSubscriptionInnerBottomShadow}
+              />
+              <View style={styles.nextSubscriptionCardContent}>
+                <View style={styles.nextSubscriptionHeaderRow}>
+                  <Text style={[styles.nextSubscriptionEyebrow, isDark ? styles.nextSubscriptionEyebrowDark : null]}>
+                    Next
+                  </Text>
+                  <Dropdown
+                    style={[
+                      styles.nextSubscriptionMenuButton,
+                      isDark ? styles.nextSubscriptionMenuButtonDark : null,
+                      !nextSubscription ? styles.nextSubscriptionMenuButtonDisabled : null,
+                    ]}
+                    data={nextSubscriptionMenuOptions}
+                    labelField="label"
+                    valueField="value"
+                    value={null}
+                    placeholder="•••"
+                    disable={!nextSubscription}
+                    maxHeight={148}
+                    dropdownPosition="top"
+                    inverted={false}
+                    activeColor={isDark ? "#374151" : "#F3F4F6"}
+                    containerStyle={[
+                      styles.nextSubscriptionDropdownMenu,
+                      isDark ? styles.nextSubscriptionDropdownMenuDark : null,
+                    ]}
+                    selectedTextStyle={[
+                      styles.nextSubscriptionMenuText,
+                      isDark ? styles.nextSubscriptionMenuTextDark : null,
+                    ]}
+                    placeholderStyle={[
+                      styles.nextSubscriptionMenuText,
+                      isDark ? styles.nextSubscriptionMenuTextDark : null,
+                    ]}
+                    itemTextStyle={[
+                      styles.nextSubscriptionDropdownText,
+                      isDark ? styles.nextSubscriptionDropdownTextDark : null,
+                    ]}
+                    showsVerticalScrollIndicator={false}
+                    renderRightIcon={() => null}
+                    onChange={handleSubscriptionMenuChange}
+                    renderItem={(item) => (
+                      <View
+                        style={[
+                          styles.nextSubscriptionDropdownItem,
+                          item.isDanger ? styles.nextSubscriptionDropdownItemDanger : null,
+                          item.isDanger && isDark ? styles.nextSubscriptionDropdownItemDangerDark : null,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.nextSubscriptionDropdownText,
+                            isDark ? styles.nextSubscriptionDropdownTextDark : null,
+                            item.isDanger ? styles.nextSubscriptionDropdownDangerText : null,
+                          ]}
+                        >
+                          {item.label}
+                        </Text>
+                      </View>
+                    )}
+                  />
+                </View>
+                {nextSubscription ? (
+                  <>
+                  <View style={styles.nextSubscriptionMainRow}>
+                    <View style={styles.nextSubscriptionMainLeft}>
+                      <View style={[styles.nextSubscriptionIconWrap, isDark ? styles.nextSubscriptionIconWrapDark : null]}>
+                        <View
+                          style={[
+                            styles.nextSubscriptionLogoGlow,
+                            {
+                              backgroundColor: nextSubscriptionGlowColor,
+                              shadowColor: nextSubscriptionGlowColor,
+                            },
+                          ]}
+                          pointerEvents="none"
+                        />
+                        {nextSubscriptionBrand?.logo.kind === "simple" ? (
+                          <SimpleBrandIcon icon={nextSubscriptionBrand.logo.icon} size={14} />
+                        ) : nextSubscriptionBrand?.logo.kind === "capcut" ? (
+                          <CapCutLogo size={14} color={isDark ? "#F9FAFB" : "#111827"} />
+                        ) : (
+                          <CalendarClock size={14} color={isDark ? "#E5E7EB" : "#111827"} />
+                        )}
+                        {nextSubscriptionBrand?.platform ? (
+                          <View style={[styles.nextSubscriptionPlatformBadge, isDark ? styles.nextSubscriptionPlatformBadgeDark : null]}>
+                            <SimpleBrandIcon icon={nextSubscriptionBrand.platform.icon} size={8} />
+                          </View>
+                        ) : null}
+                      </View>
+                      <View style={styles.nextSubscriptionMainTitleWrap}>
+                        <Text
+                          style={[styles.nextSubscriptionName, isDark ? styles.nextSubscriptionNameDark : null]}
+                          numberOfLines={1}
+                          ellipsizeMode="tail"
+                        >
+                          {nextSubscriptionServiceName}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text
+                      style={[styles.nextSubscriptionAmount, isDark ? styles.nextSubscriptionAmountDark : null]}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
+                      {nextSubscriptionAmountLabel}
+                    </Text>
+                  </View>
+                  {nextSubscriptionBillingLabel ? (
+                    <View style={styles.nextSubscriptionBillingRow}>
+                      <Text
+                        style={[styles.nextSubscriptionBilling, isDark ? styles.nextSubscriptionBillingDark : null]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {nextSubscriptionBillingLabel}
+                      </Text>
+                    </View>
+                  ) : null}
+                  <View style={styles.nextSubscriptionDueRow}>
+                    <Text
+                      style={[styles.nextSubscriptionMeta, isDark ? styles.nextSubscriptionMetaDark : null]}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
+                      {nextSubscriptionDueLabel}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.nextSubscriptionDuePill,
+                        isDark ? styles.nextSubscriptionDuePillDark : null,
+                        nextSubscriptionIsUrgent ? styles.nextSubscriptionDuePillUrgent : null,
+                        isDark && nextSubscriptionIsUrgent ? styles.nextSubscriptionDuePillUrgentDark : null,
+                        isNextSubscriptionAcknowledged ? styles.nextSubscriptionDuePillAcknowledged : null,
+                        isDark && isNextSubscriptionAcknowledged ? styles.nextSubscriptionDuePillAcknowledgedDark : null,
+                      ]}
+                    >
+                      {isNextSubscriptionAcknowledged ? "planned" : nextSubscriptionRelativeLabel}
+                    </Text>
+                  </View>
+                  <View style={styles.nextSubscriptionActionZone}>
+                    {isNextSubscriptionAcknowledged ? (
+                      <View style={[styles.nextSubscriptionPlannedLabel, isDark ? styles.nextSubscriptionPlannedLabelDark : null]}>
+                        <Text style={[styles.nextSubscriptionPlannedIcon, isDark ? styles.nextSubscriptionPlannedIconDark : null]}>✓</Text>
+                        <Text style={[styles.nextSubscriptionPlannedText, isDark ? styles.nextSubscriptionPlannedTextDark : null]}>
+                          Planned
+                        </Text>
+                      </View>
+                    ) : (
+                      <Pressable
+                        onPress={handleAcknowledgeSubscription}
+                        style={[
+                          styles.nextSubscriptionAcknowledgeButton,
+                          isDark ? styles.nextSubscriptionAcknowledgeButtonDark : null,
+                        ]}
+                      >
+                        <View style={styles.nextSubscriptionAcknowledgeContent}>
+                          <Text style={styles.nextSubscriptionAcknowledgeIcon}>✓</Text>
+                          <Text style={styles.nextSubscriptionAcknowledgeText}>Acknowledge</Text>
+                        </View>
+                      </Pressable>
+                    )}
+                  </View>
+                  <View
+                    style={[
+                      styles.nextSubscriptionProgressTrack,
+                      isDark ? styles.nextSubscriptionProgressTrackDark : null,
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.nextSubscriptionProgressFill,
+                        {
+                          width: `${Math.max(0, Math.min(100, Math.round(nextSubscriptionCycleProgress * 100)))}%`,
+                          backgroundColor: nextSubscriptionProgressColor,
+                        },
+                      ]}
+                    />
+                  </View>
+                </>
+              ) : (
+                <>
+                  <View style={styles.nextSubscriptionMainRow}>
+                    <View style={styles.nextSubscriptionMainLeft}>
+                      <View style={[styles.nextSubscriptionIconWrap, isDark ? styles.nextSubscriptionIconWrapDark : null]}>
+                        <CalendarClock size={14} color={isDark ? "#E5E7EB" : "#111827"} />
+                      </View>
+                      <View style={styles.nextSubscriptionMainTitleWrap}>
+                        <Text style={[styles.nextSubscriptionName, isDark ? styles.nextSubscriptionNameDark : null]}>
+                          No plans
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                  <View style={styles.nextSubscriptionBillingRow}>
+                    <Text style={[styles.nextSubscriptionBilling, isDark ? styles.nextSubscriptionBillingDark : null]}>
+                      Add in Settings
+                    </Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.nextSubscriptionProgressTrack,
+                      isDark ? styles.nextSubscriptionProgressTrackDark : null,
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.nextSubscriptionProgressFill,
+                        { width: "0%", backgroundColor: nextSubscriptionProgressColor },
+                      ]}
+                    />
+                  </View>
+                  </>
+                )}
+              </View>
+            </View>
+          </View>
+        </ScrollView>
       </View>
       <Modal visible={isAddCategoryVisible} transparent animationType="fade" onRequestClose={closeAddCategoryModal}>
         <Pressable style={styles.categoryModalOverlay} onPress={closeAddCategoryModal}>
@@ -703,11 +1336,382 @@ const styles = StyleSheet.create({
   contentForeground: {
     flex: 1,
   },
+  contentScrollContent: {
+    alignItems: "center",
+    paddingTop: 2,
+  },
   gridLoading: {
-    flex: 1,
+    width: "100%",
     alignItems: "center",
     justifyContent: "center",
-    paddingTop: 16,
+    paddingVertical: 16,
+  },
+  nextSubscriptionSection: {
+    width: 378,
+    maxWidth: "100%",
+    alignSelf: "center",
+    alignItems: "flex-start",
+    paddingHorizontal: 16,
+    marginTop: 24,
+  },
+  nextSubscriptionCard: {
+    width: "48%",
+    minWidth: 176,
+    maxWidth: 186,
+    aspectRatio: 1,
+    borderRadius: 34,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#F8FAFC",
+    alignItems: "flex-start",
+    justifyContent: "flex-start",
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    overflow: "hidden",
+  },
+  nextSubscriptionCardDark: {
+    borderColor: "#374151",
+    backgroundColor: "#111827",
+  },
+  nextSubscriptionCardContent: {
+    width: "100%",
+    height: "100%",
+    zIndex: 1,
+  },
+  nextSubscriptionInnerTopShadow: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 14,
+    zIndex: 2,
+  },
+  nextSubscriptionInnerBottomShadow: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 34,
+    zIndex: 2,
+  },
+  nextSubscriptionIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "#E2E8F0",
+    overflow: "visible",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  nextSubscriptionIconWrapDark: {
+    backgroundColor: "#1F2937",
+  },
+  nextSubscriptionLogoGlow: {
+    position: "absolute",
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    top: -8,
+    left: -8,
+    opacity: 0.4,
+    shadowOpacity: 0.95,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 12,
+  },
+  nextSubscriptionPlatformBadge: {
+    position: "absolute",
+    right: -4,
+    bottom: -4,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  nextSubscriptionPlatformBadgeDark: {
+    borderColor: "#4B5563",
+    backgroundColor: "#111827",
+  },
+  nextSubscriptionEyebrow: {
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 1.1,
+    color: "#6B7280",
+    textTransform: "uppercase",
+    lineHeight: 11,
+  },
+  nextSubscriptionEyebrowDark: {
+    color: "#6B7280",
+  },
+  nextSubscriptionHeaderRow: {
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    zIndex: 6,
+  },
+  nextSubscriptionMenuButton: {
+    width: NEXT_SUBSCRIPTION_MENU_TRIGGER_WIDTH,
+    minWidth: NEXT_SUBSCRIPTION_MENU_TRIGGER_WIDTH,
+    height: 16,
+    minHeight: 16,
+    borderRadius: 8,
+    paddingHorizontal: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#E5E7EB",
+  },
+  nextSubscriptionMenuButtonDark: {
+    backgroundColor: "#374151",
+  },
+  nextSubscriptionMenuButtonDisabled: {
+    opacity: 0.45,
+  },
+  nextSubscriptionMenuText: {
+    width: "100%",
+    flex: 0,
+    textAlign: "center",
+    textAlignVertical: "center",
+    includeFontPadding: false,
+    color: "#6B7280",
+    fontSize: 8,
+    fontWeight: "800",
+    letterSpacing: -0.5,
+    lineHeight: 9,
+  },
+  nextSubscriptionMenuTextDark: {
+    color: "#D1D5DB",
+  },
+  nextSubscriptionDropdownMenu: {
+    width: NEXT_SUBSCRIPTION_MENU_WIDTH,
+    marginLeft: 20,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#FFFFFF",
+    overflow: "hidden",
+  },
+  nextSubscriptionDropdownMenuDark: {
+    borderColor: "#374151",
+    backgroundColor: "#1F2937",
+  },
+  nextSubscriptionDropdownItem: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  nextSubscriptionDropdownItemDanger: {
+    borderTopWidth: 1,
+    borderTopColor: "#E5E7EB",
+  },
+  nextSubscriptionDropdownItemDangerDark: {
+    borderTopColor: "#374151",
+  },
+  nextSubscriptionDropdownText: {
+    fontSize: 10,
+    fontWeight: "600",
+    color: "#111827",
+  },
+  nextSubscriptionDropdownTextDark: {
+    color: "#F3F4F6",
+  },
+  nextSubscriptionDropdownDangerText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#DC2626",
+  },
+  nextSubscriptionMainRow: {
+    marginTop: 8,
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  nextSubscriptionMainLeft: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingRight: 8,
+  },
+  nextSubscriptionMainTitleWrap: {
+    marginLeft: 6,
+    flex: 1,
+    minWidth: 0,
+    justifyContent: "center",
+  },
+  nextSubscriptionBillingRow: {
+    marginTop: 2,
+    width: "100%",
+    paddingLeft: 36,
+  },
+  nextSubscriptionName: {
+    marginTop: 0,
+    textAlign: "left",
+    fontSize: 11,
+    fontWeight: "800",
+    lineHeight: 12,
+    color: "#111827",
+  },
+  nextSubscriptionNameDark: {
+    color: "#FFFFFF",
+  },
+  nextSubscriptionBilling: {
+    marginTop: 1,
+    textAlign: "left",
+    fontSize: 7.5,
+    fontWeight: "600",
+    lineHeight: 9,
+    color: "#6B7280",
+  },
+  nextSubscriptionBillingDark: {
+    color: "#9CA3AF",
+  },
+  nextSubscriptionDueRow: {
+    marginTop: 4,
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  nextSubscriptionActionZone: {
+    flex: 1,
+    width: "100%",
+    justifyContent: "center",
+    paddingTop: 3,
+  },
+  nextSubscriptionAcknowledgeButton: {
+    width: "100%",
+    alignSelf: "stretch",
+    marginHorizontal: 0,
+    minHeight: 20,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(100,116,139,0.28)",
+  },
+  nextSubscriptionAcknowledgeButtonDark: {
+    backgroundColor: "rgba(55,65,81,0.75)",
+  },
+  nextSubscriptionAcknowledgeContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  nextSubscriptionAcknowledgeIcon: {
+    color: "#FFFFFF",
+    fontSize: 8,
+    lineHeight: 8,
+    fontWeight: "700",
+  },
+  nextSubscriptionAcknowledgeText: {
+    color: "#FFFFFF",
+    fontSize: 8,
+    lineHeight: 9,
+    fontWeight: "900",
+  },
+  nextSubscriptionPlannedLabel: {
+    width: "100%",
+    minHeight: 20,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 4,
+    backgroundColor: "rgba(16,185,129,0.22)",
+  },
+  nextSubscriptionPlannedLabelDark: {
+    backgroundColor: "rgba(16,185,129,0.28)",
+  },
+  nextSubscriptionPlannedIcon: {
+    color: "#047857",
+    fontSize: 8,
+    lineHeight: 8,
+    fontWeight: "700",
+  },
+  nextSubscriptionPlannedIconDark: {
+    color: "#34D399",
+  },
+  nextSubscriptionPlannedText: {
+    color: "#065F46",
+    fontSize: 8,
+    lineHeight: 9,
+    fontWeight: "600",
+  },
+  nextSubscriptionPlannedTextDark: {
+    color: "#6EE7B7",
+  },
+  nextSubscriptionMeta: {
+    marginTop: 0,
+    textAlign: "left",
+    fontSize: 8,
+    fontWeight: "400",
+    lineHeight: 9,
+    color: "#6B7280",
+  },
+  nextSubscriptionMetaDark: {
+    color: "#9CA3AF",
+  },
+  nextSubscriptionDuePill: {
+    borderRadius: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    fontSize: 8,
+    fontWeight: "700",
+    color: "#4B5563",
+    backgroundColor: "#E5E7EB",
+    overflow: "hidden",
+  },
+  nextSubscriptionDuePillDark: {
+    color: "#D1D5DB",
+    backgroundColor: "#374151",
+  },
+  nextSubscriptionDuePillUrgent: {
+    color: "#D97706",
+    backgroundColor: "#FDE68A",
+  },
+  nextSubscriptionDuePillUrgentDark: {
+    color: "#FCD34D",
+    backgroundColor: "rgba(245,158,11,0.25)",
+  },
+  nextSubscriptionDuePillAcknowledged: {
+    color: "#065F46",
+    backgroundColor: "#BBF7D0",
+  },
+  nextSubscriptionDuePillAcknowledgedDark: {
+    color: "#86EFAC",
+    backgroundColor: "rgba(22,163,74,0.3)",
+  },
+  nextSubscriptionProgressTrack: {
+    marginTop: 0,
+    width: "100%",
+    height: 4,
+    borderRadius: 999,
+    overflow: "hidden",
+    backgroundColor: "#E2E8F0",
+  },
+  nextSubscriptionProgressTrackDark: {
+    backgroundColor: "#374151",
+  },
+  nextSubscriptionProgressFill: {
+    height: "100%",
+    borderRadius: 999,
+    backgroundColor: "#64748B",
+  },
+  nextSubscriptionAmount: {
+    marginTop: 0,
+    maxWidth: "46%",
+    textAlign: "right",
+    fontSize: 11,
+    fontWeight: "800",
+    lineHeight: 12,
+    color: "#111827",
+  },
+  nextSubscriptionAmountDark: {
+    color: "#FFFFFF",
   },
   categoryModalOverlay: {
     flex: 1,

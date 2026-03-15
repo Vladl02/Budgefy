@@ -16,6 +16,11 @@ import { useRouter } from "expo-router";
 import { useNavigation } from "@react-navigation/native";
 import { SlidingSheet } from "@/src/components/SlidingSheet";
 import { useAppTheme } from "@/src/providers/AppThemeProvider";
+import {
+  loadRecurringPayments,
+  saveRecurringPayments,
+  type RecurringPayment,
+} from "@/src/utils/recurringPayments";
 import { Plus, CreditCard, ChevronLeft, Bell, Trash2, Search, Check, ChevronRight, BellRing } from 'lucide-react-native';
 import Svg, { Path } from "react-native-svg";
 import {
@@ -76,17 +81,6 @@ Notifications.setNotificationHandler({
 
 // --- DATA DEFINITIONS ---
 
-interface Payment {
-  id: string;
-  name: string;
-  amount: number;
-  day: string;
-  color: string; 
-  currency: string;
-  notificationId?: string;
-  reminderOffset?: number;
-}
-
 interface CurrencyOption {
   code: string;
   symbol: string;
@@ -111,10 +105,6 @@ const REMINDER_OPTIONS = [
   { label: '1 day before', value: 1 },
   { label: '3 days before', value: 3 },
   { label: '1 week before', value: 7 },
-];
-
-const INITIAL_PAYMENTS: Payment[] = [
-  { id: '1', name: 'Netflix', amount: 15.99, day: '12', color: "#E50914", currency: 'USD' },
 ];
 
 const ICON_PALETTE = [
@@ -184,7 +174,8 @@ export default function RecurringExpense() {
   const showHeader = isAdding || isSelectingCurrency;
 
   // Data States
-  const [payments, setPayments] = useState<Payment[]>(INITIAL_PAYMENTS);
+  const [payments, setPayments] = useState<RecurringPayment[]>([]);
+  const [isRecurringPaymentsHydrated, setIsRecurringPaymentsHydrated] = useState(false);
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
   const [day, setDay] = useState("");
@@ -224,6 +215,30 @@ export default function RecurringExpense() {
     };
     fetchRates();
   }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const hydrateRecurringPayments = async () => {
+      const storedPayments = await loadRecurringPayments();
+      if (!isMounted) return;
+      setPayments(storedPayments);
+      setIsRecurringPaymentsHydrated(true);
+    };
+
+    void hydrateRecurringPayments();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isRecurringPaymentsHydrated) return;
+
+    void saveRecurringPayments(payments).catch((error) => {
+      console.error("Failed to save recurring payments", error);
+    });
+  }, [isRecurringPaymentsHydrated, payments]);
 
   // --- LOGIC ---
 
@@ -278,7 +293,7 @@ export default function RecurringExpense() {
     
     const notificationId = await scheduleReminder(name, amountStr, day, reminderOffset);
 
-    const newPayment: Payment = {
+    const newPayment: RecurringPayment = {
       id: Math.random().toString(),
       name,
       amount: parseFloat(amount),
@@ -350,7 +365,7 @@ export default function RecurringExpense() {
   const firstWeekdayIndex = useMemo(() => calendarMonthStart.getDay(), [calendarMonthStart]);
 
   const subscriptionsByDay = useMemo(() => {
-    const grouped = new Map<number, Payment[]>();
+    const grouped = new Map<number, RecurringPayment[]>();
 
     payments.forEach((payment) => {
       const rawDay = Number.parseInt(payment.day, 10);
